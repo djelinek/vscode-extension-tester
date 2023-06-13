@@ -213,7 +213,7 @@ export class CodeUtil {
         const extension = `${pjson.publisher}.${pjson.name}`;
 
         if (cleanup) {
-            let command = `${this.cliEnv} "${this.executablePath}" "${this.cliPath}" --ms-enable-electron-run-as-node --uninstall-extension "${extension}"`;
+            let command = `${this.cliEnv} "${this.executablePath}" "${this.cliPath}" --uninstall-extension "${extension}"`;
             if (this.extensionsFolder) {
                 command += ` --extensions-dir=${this.extensionsFolder}`;
             }
