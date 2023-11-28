@@ -30,7 +30,8 @@
 		"compile": "tsc -p ./ && npm run lint",
 		"lint": "eslint src --ext .ts",
 		"watch": "tsc -watch -p ./",
-		"ui-test": "extest setup-and-run './out/ui-test/*-test.js' --code_settings settings.json --extensions_dir .test-extensions"
+		"ui-test": "extest setup-and-run './out/ui-test/*-test.js' --code_settings settings.json --extensions_dir .test-extensions",
+		"ui-test:pvs": "extest setup-tests --extensions_dir .test-extensions && extest install-from-marketplace --extensions_dir .test-extensions EvgeniyRyzhkov.pvs-studio-vscode && extest run-tests './out/ui-test/pvs-studio/*-test.js' --extensions_dir .test-extensions --code_settings settings.json"
 	},
 	"devDependencies": {
 		"@types/chai": "^4.3.7",
