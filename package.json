@@ -53,7 +53,7 @@
     "typescript": "*"
   },
   "dependencies": {
-    "@types/selenium-webdriver": "^4.1.21",
+    "@types/selenium-webdriver": "^4.1.22",
     "@types/targz": "^1.0.4",
     "@vscode/vsce": "^2.24.0",
     "commander": "^12.0.0",
