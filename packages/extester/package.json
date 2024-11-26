@@ -59,7 +59,7 @@
   "dependencies": {
     "@redhat-developer/locators": "^1.2.0",
     "@redhat-developer/page-objects": "^1.2.0",
-    "@types/selenium-webdriver": "^4.1.24",
+    "@types/selenium-webdriver": "^4.1.27",
     "@vscode/vsce": "^2.31.1",
     "c8": "^10.1.2",
     "commander": "^12.1.0",
@@ -71,7 +71,7 @@
     "hpagent": "^1.2.0",
     "js-yaml": "^4.1.0",
     "sanitize-filename": "^1.6.3",
-    "selenium-webdriver": "^4.23.0",
+    "selenium-webdriver": "^4.27.0",
     "targz": "^1.0.1",
     "unzipper": "^0.12.2"
   },
