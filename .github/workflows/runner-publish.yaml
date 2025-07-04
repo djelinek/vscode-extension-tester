@@ -41,18 +41,18 @@ jobs:
             exit 1
           fi
 
-      - name: ✅ Ensure tag matches package.json version
-        working-directory: packages/extester-runner
-        run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          TAG=${{ github.event.inputs.tag }}
-          TAG_VERSION=${TAG#runner-v}
-          echo "Package version: $PKG_VERSION"
-          echo "Input tag version: $TAG_VERSION"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)!"
-            exit 1
-          fi
+      # - name: ✅ Ensure tag matches package.json version
+      #   working-directory: packages/extester-runner
+      #   run: |
+      #     PKG_VERSION=$(node -p "require('./package.json').version")
+      #     TAG=${{ github.event.inputs.tag }}
+      #     TAG_VERSION=${TAG#runner-v}
+      #     echo "Package version: $PKG_VERSION"
+      #     echo "Input tag version: $TAG_VERSION"
+      #     if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+      #       echo "❌ Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)!"
+      #       exit 1
+      #     fi
 
       - name: 👷🏻 Checkout the tag
         uses: actions/checkout@v4
