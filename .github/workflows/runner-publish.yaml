@@ -147,7 +147,7 @@ jobs:
           format_section() {
             local pattern="$1"
             local title="$2"
-            local content=$(echo "$LOG" | grep -iE "^$pattern" || true)
+            local content=$(echo "$LOG" | grep -iE "$pattern" || true)
             if [[ -n "$content" ]]; then
               echo "### $title"
               echo "$content"
@@ -156,14 +156,14 @@ jobs:
           }
 
           {
-            format_section '^feat|^feature' "🚀 Features"
-            format_section '^fix' "🚫 Bugs"
-            format_section '^test' "🔎 Tests"
-            format_section '^chore|^refactor|^internal|^ci|^docs' "🔧 Maintenance"
-            format_section '^deps|^dependencies' "📦 Dependencies"
+            format_section 'feat|feature' "🚀 Features"
+            format_section 'fix' "🚫 Bugs"
+            format_section 'test' "🔎 Tests"
+            format_section 'chore|refactor|internal|ci|docs' "🔧 Maintenance"
+            format_section 'deps|dependencies' "📦 Dependencies"
 
             # Other commits not matching any above
-            OTHER=$(echo "$LOG" | grep -vE '^(feat|feature|fix|test|chore|refactor|internal|ci|docs|deps|dependencies)' || true)
+            OTHER=$(echo "$LOG" | grep -vE 'feat|feature|fix|test|chore|refactor|internal|ci|docs|deps|dependencies' || true)
             if [[ -n "$OTHER" ]]; then
               echo "### 🧼 Other Changes"
               echo "$OTHER"
