@@ -113,6 +113,7 @@ jobs:
             LOG="Initial release (first tag)"
           fi
 
+          # Helper to format sections
           format_section() {
             local pattern="$1"
             local title="$2"
@@ -134,6 +135,23 @@ jobs:
             fi
           }
 
+          # Function to format commits with commit message, author, and hash
+          format_commit_details() {
+            echo "$LOG" | while IFS= read -r line; do
+              COMMIT_HASH=$(echo "$line" | awk '{print $1}')  # Get commit hash
+              COMMIT_MESSAGE=$(echo "$line" | cut -d' ' -f2-)  # Get commit message
+
+              # Clean commit message (remove parentheses with issue references)
+              CLEANED_COMMIT_MESSAGE=$(echo "$COMMIT_MESSAGE" | sed 's/(.*)//')
+
+              # Extract author information
+              AUTHOR=$(git log --format='%aN' -n 1 $COMMIT_HASH)
+
+              # Format commit: message by author with commit hash at the end
+              echo "- $CLEANED_COMMIT_MESSAGE by @$AUTHOR in '$COMMIT_HASH'"
+            done
+          }
+
           {
             echo "## What's Changed"
             format_section '^break|^breaking' "⚠️ Breaking"
@@ -142,6 +160,11 @@ jobs:
             format_section '^test' "🔎 Tests"
             format_section '^chore|^refactor|^internal|^ci|^docs' "🔧 Maintenance"
             format_section '^deps|^dependencies|^build' "📦 Dependencies"
+
+            # Commits with message, author, and commit hash
+            echo "### Commits"
+            format_commit_details
+
             format_other_section
           } > CHANGELOG.md
 
