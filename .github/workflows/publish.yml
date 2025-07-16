@@ -150,12 +150,16 @@ jobs:
           cat CHANGELOG.md
 
       - name: 🔧 Config .npmrc
-        if: ${{ github.event.inputs.skipPublish != 'true' }}
+        # if: ${{ github.event.inputs.skipPublish != 'true' }}
         run: |
           {
             echo "registry=https://registry.npmjs.com"
-            echo "//registry.npmjs.com/:_authToken=${NPM_TOKEN}"
+            echo "//registry.npmjs.com/:_authToken=\${NPM_TOKEN}"
           } > .npmrc
+
+      - name: 🔧 Print .npmrc
+        run: |
+          cat .npmrc
 
       - name: 🚀 Publish to NPM registry (npmjs)
         if: ${{ github.event.inputs.skipPublish != 'true' }}
