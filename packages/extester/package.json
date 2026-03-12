@@ -52,7 +52,7 @@
     "ui-test"
   ],
   "supportedVersions": {
-    "vscode-min": "1.109.5",
+    "vscode-min": "1.110.0",
     "vscode-max": "1.111.0"
   },
   "dependencies": {
