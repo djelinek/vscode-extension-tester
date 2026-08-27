@@ -741,16 +741,25 @@ export class TextEditor extends Editor {
 		const breakpoints: Breakpoint[] = [];
 
 		const breakpointLocators = Breakpoint.locators.TextEditor.breakpoint;
-		const breakpointContainer = satisfies(TextEditor.versionInfo.version, '>=1.80.0')
-			? await this.findElement(TextEditor.locators.TextEditor.glyphMarginWidget)
-			: this;
+		const isNewVersion = satisfies(TextEditor.versionInfo.version, '>=1.80.0');
+		const breakpointContainer = isNewVersion ? await this.findElement(TextEditor.locators.TextEditor.glyphMarginWidget) : this;
 		const breakpointsSelectors = await breakpointContainer.findElements(breakpointLocators.generalSelector);
+
+		// When a debug session is paused at a breakpoint, VS Code renders two overlapping
+		// elements with the `codicon-debug-breakpoint` class at the same vertical position
+		// (the regular breakpoint dot and the stackframe arrow). Deduplicate by `top` so
+		// that each line contributes at most one Breakpoint.
+		const seenTops = new Set<string>();
 
 		for (const breakpointSelector of breakpointsSelectors) {
 			try {
 				let lineElement: WebElement;
-				if (satisfies(TextEditor.versionInfo.version, '>=1.80.0')) {
+				if (isNewVersion) {
 					const styleTopAttr = await breakpointSelector.getCssValue('top');
+					if (seenTops.has(styleTopAttr)) {
+						continue;
+					}
+					seenTops.add(styleTopAttr);
 					lineElement = await this.findElement(TextEditor.locators.TextEditor.marginArea).findElement(
 						TextEditor.locators.TextEditor.lineElement(styleTopAttr),
 					);
