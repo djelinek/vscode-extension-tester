@@ -44,22 +44,23 @@ describe('Extension Editor', function () {
 	let extensionEditorDetails: ExtensionEditorDetailsSection;
 
 	before(async function () {
-		this.timeout(20000);
+		this.timeout(60000);
 
 		driver = VSBrowser.instance.driver;
+		await driver.switchTo().defaultContent();
 		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-folder'));
 		await VSBrowser.instance.waitForWorkbench();
 		viewControl = (await new ActivityBar().getViewControl('Extensions')) as ViewControl;
 		extensionsView = await viewControl.openView();
 		await driver.wait(async function () {
 			return (await extensionsView.getContent().getSections()).length > 0;
-		});
+		}, 15000);
 
 		const view = await viewControl.openView();
 
 		await driver.wait(async function () {
 			return (await view.getContent().getSections()).length > 0;
-		});
+		}, 15000);
 		await driver.wait(async function () {
 			try {
 				const currentView = await viewControl.openView();
@@ -72,31 +73,47 @@ describe('Extension Editor', function () {
 				}
 				throw e;
 			}
-		});
+		}, 30000);
 
-		await item.click();
 		await driver.wait(
 			async () => {
+				try {
+					await item.click();
+				} catch {
+					// click may fail transiently — retry on next poll
+				}
 				const titles = await new EditorView().getOpenEditorTitles();
 				return titles.some((title) => title.includes('Extension:'));
 			},
-			10000,
+			30000,
 			'Extension editor did not open after click',
 		);
 	});
 
 	// ensure clean workbench
 	before(async function () {
+		this.timeout(15000);
 		const panel = new BottomBarPanel();
 		if (await panel.isDisplayed()) {
 			await panel.toggle(false);
 		}
-		await (await new Workbench().openNotificationsCenter()).clearAllNotifications();
+		try {
+			await (await new Workbench().openNotificationsCenter()).clearAllNotifications();
+		} catch {
+			// Notifications center may already be empty or not accessible
+		}
 	});
 
 	after(async function () {
+		this.timeout(30000);
 		await viewControl.closeView();
 		await new EditorView().closeAllEditors();
+		// Re-open the original workspace. The first before() hook changed
+		// the workspace to test-folder via openResources — subsequent test
+		// files (settingsEditor, textEditor) need the workspace to be the
+		// test-project root so their CLI-based file opens can succeed.
+		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..'));
+		await VSBrowser.instance.waitForWorkbench();
 	});
 
 	describe('ExtensionEditorView', function () {

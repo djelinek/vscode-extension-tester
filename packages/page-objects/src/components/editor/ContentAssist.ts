@@ -37,11 +37,26 @@ export class ContentAssist extends Menu {
 		let lastItem = false;
 		const scrollable = await this.findElement(ContentAssist.locators.ContentAssist.itemList);
 
+		// Scroll to the top and wait for the first virtual row (data-index=0) to appear.
+		// On slow CI runners the list may not have rendered its first row yet.
 		let firstItem = await this.findElements(ContentAssist.locators.ContentAssist.firstItem);
 		while (firstItem.length < 1) {
 			await scrollable.sendKeys(Key.PAGE_UP, Key.NULL);
+			await this.getWaitHelper().sleep(200);
 			firstItem = await this.findElements(ContentAssist.locators.ContentAssist.firstItem);
 		}
+
+		// After reaching the top, wait for at least one visible item to be rendered.
+		// isLoaded() only checks the message element — it returns true even when the
+		// item rows are empty, so we need an explicit non-empty check here.
+		await this.getDriver().wait(
+			async () => {
+				const rows = await this.findElements(ContentAssist.locators.ContentAssist.itemRow);
+				return rows.length > 0;
+			},
+			10000,
+			'Content assist item list did not populate within 10s',
+		);
 
 		while (!lastItem) {
 			const items = await this.getItems();
@@ -54,8 +69,9 @@ export class ContentAssist extends Menu {
 			}
 			if (!lastItem) {
 				await scrollable.sendKeys(Key.PAGE_DOWN);
-				// Minimal delay for scroll to render new items
-				await this.getWaitHelper().sleep(100);
+				// Wait for the virtual list to finish rendering the next page.
+				// 300ms is a safe minimum on slow macOS CI runners.
+				await this.getWaitHelper().sleep(300);
 			}
 		}
 	}

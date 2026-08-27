@@ -34,15 +34,19 @@ export class ViewControl extends ElementWithContextMenu {
 	 * @returns Promise resolving to SideBarView object representing the opened view
 	 */
 	async openView(): Promise<SideBarView> {
-		// Check whether view is already open
-		const klass = (await this.getAttribute(ViewControl.locators.ViewControl.attribute))!;
+		// Use safeGetKlass so a stale reference is transparently re-fetched.
+		const klass = await this.safeGetKlass();
 		if (klass.indexOf(ViewControl.locators.ViewControl.klass) < 0) {
-			await this.click();
+			await this.safeClick();
 			// Wait for view to be marked as active
 			await this.getWaitHelper().forCondition(
 				async () => {
-					const newKlass = (await this.getAttribute(ViewControl.locators.ViewControl.attribute))!;
-					return newKlass.includes(ViewControl.locators.ViewControl.klass);
+					try {
+						const newKlass = await this.safeGetKlass();
+						return newKlass.includes(ViewControl.locators.ViewControl.klass);
+					} catch {
+						return false;
+					}
 				},
 				{ timeout: 2000, pollInterval: 100 },
 			);
@@ -65,9 +69,9 @@ export class ViewControl extends ElementWithContextMenu {
 	 * @returns Promise resolving when the view closes
 	 */
 	async closeView(): Promise<void> {
-		const klass = (await this.getAttribute(ViewControl.locators.ViewControl.attribute))!;
+		const klass = await this.safeGetKlass();
 		if (klass.indexOf(ViewControl.locators.ViewControl.klass) > -1) {
-			await this.click();
+			await this.safeClick();
 		}
 	}
 
@@ -77,5 +81,38 @@ export class ViewControl extends ElementWithContextMenu {
 	async getTitle(): Promise<string> {
 		const badge = await this.findElement(ViewControl.locators.ViewControl.badge);
 		return (await badge.getAttribute('aria-label'))!;
+	}
+
+	/**
+	 * Read the CSS class attribute from this element, recovering transparently if
+	 * the stored reference has become stale.  Falls back to re-querying the parent
+	 * activity bar by the control's aria-label when the element is stale.
+	 */
+	private async safeGetKlass(): Promise<string> {
+		try {
+			return (await this.getAttribute(ViewControl.locators.ViewControl.attribute))!;
+		} catch {
+			// The stored WebElement is stale — re-fetch from the activity bar DOM.
+			// getViewControls() always queries live elements, so the new reference is fresh.
+			const bar = new ActivityBar();
+			const fresh = await bar.getViewControl(await this.getTitleFallback());
+			if (!fresh) {
+				throw new Error(`ViewControl: could not re-locate stale element in the activity bar`);
+			}
+			return (await fresh.getAttribute(ViewControl.locators.ViewControl.attribute))!;
+		}
+	}
+
+	/**
+	 * Return the title of this view control, tolerating stale element references.
+	 * Used internally by safeGetKlass() to identify the control after it goes stale.
+	 */
+	private async getTitleFallback(): Promise<string> {
+		try {
+			return await this.getTitle();
+		} catch {
+			// If even getTitle() throws, fall back to the aria-label on this element directly.
+			return (await this.getAttribute('aria-label')) ?? '';
+		}
 	}
 }
