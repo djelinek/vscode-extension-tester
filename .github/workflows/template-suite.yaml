@@ -63,7 +63,7 @@ jobs:
         run: npm run build
 
       - name: ✨ Code Formatter - Prettier
-        run: npx prettier . --check
+        run: ./node_modules/.bin/prettier . --check
 
       - name: 🔧 Install - Test Project
         run: npm install --workspace=extester-test
