@@ -50,6 +50,10 @@ jobs:
       - name: 👷🏻 Checkout Repository
         uses: actions/checkout@v7
 
+      - name: ⚙️ Set TEST_RESOURCES path
+        run: echo "TEST_RESOURCES=${{ runner.temp }}/test-resources" >> $GITHUB_ENV
+        shell: bash
+
       - name: ⚙️ Setup NodeJS
         uses: actions/setup-node@v7
         with:
@@ -80,20 +84,11 @@ jobs:
         if: ${{ startsWith(matrix.os, 'ubuntu') }}
         run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run test:${{ inputs.test_group }} --workspace=extester-test
 
-      - name: 💾 Upload Screenshots
+      - name: 💾 Upload Screenshots and ChromeDriver logs
         uses: actions/upload-artifact@v7
-        if: failure() && inputs.nodejs != 'lts/*'
+        if: failure()
         with:
-          name: screenshots-${{ inputs.test_group }}-${{ matrix.label }}-node_${{ inputs.nodejs }}
-          path: |
-            ${{ runner.temp }}/test-resources/screenshots/**/*.png
-            ${{ runner.temp }}/test-resources/chromedriver.log
-
-      - name: 💾 Upload Screenshots
-        uses: actions/upload-artifact@v7
-        if: failure() && inputs.nodejs == 'lts/*'
-        with:
-          name: screenshots-${{ inputs.test_group }}-${{ matrix.label }}-node_lts
+          name: screenshots-and-logs-${{ matrix.label }}-${{ inputs.test_group }}
           path: |
             ${{ runner.temp }}/test-resources/screenshots/**/*.png
             ${{ runner.temp }}/test-resources/chromedriver.log
