@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { Locator, WebElement, error, until } from 'selenium-webdriver';
+import { Locator, WebElement, error } from 'selenium-webdriver';
 import { AbstractElement } from './AbstractElement';
 
 /**
@@ -86,25 +86,27 @@ export default function <TBase extends Constructor<WebviewMixable>>(Base: TBase)
 		 * Note that only elements inside the webview iframe will be accessible.
 		 * Use the switchBack method to switch to the original context.
 		 *
-		 * The method polls for the outer iframe to appear in the DOM, which handles
-		 * the race where VS Code has not yet rendered the iframe after the command
-		 * that opened the panel resolves.
+		 * The method polls for both the outer iframe and the inner active-frame to
+		 * appear in the DOM under a single shared deadline, so `timeout` is always
+		 * honoured regardless of how long each phase takes.  The driver is always
+		 * returned to the top-level context before any error is thrown.
 		 *
 		 * @throws Error when the webview iframe cannot be located within the timeout
 		 */
 		async switchToFrame(timeout: number = 5000): Promise<void> {
-			// Capture the handle before any frame switch so switchBack() always
-			// has the correct top-level window regardless of how this method exits.
+			// Capture the window handle before any frame switch so switchBack()
+			// always has the correct top-level context regardless of how we exit.
 			if (!this.handle) {
 				this.handle = await this.getDriver().getWindowHandle();
 			}
 
-			// Poll for the outer webview iframe — it may not yet be in the DOM
-			// immediately after the command that opened the panel resolves.
-			let view: WebElement | undefined;
 			const deadline = Date.now() + timeout;
 			const pollInterval = 200;
 
+			// Phase 1 — poll for the outer webview iframe under the shared deadline.
+			// The iframe may not yet be in the DOM immediately after the command that
+			// opened the panel resolves (VS Code renders it asynchronously).
+			let view: WebElement | undefined;
 			while (Date.now() < deadline) {
 				try {
 					view = await this.getViewToSwitchTo();
@@ -127,11 +129,39 @@ export default function <TBase extends Constructor<WebviewMixable>>(Base: TBase)
 				);
 			}
 
+			// Phase 2 — switch into the outer iframe, then poll for the inner
+			// active-frame under the remaining budget of the same shared deadline.
+			// On any failure we return to the top-level window before rethrowing so
+			// the driver context is always clean when this method throws.
 			await this.getDriver().switchTo().frame(view);
 
-			// Wait for the inner active-frame iframe to be present, then switch into it.
-			await this.getDriver().wait(until.elementLocated(AbstractElement.locators.WebView.activeFrame), timeout);
-			const frame = await this.getDriver().findElement(AbstractElement.locators.WebView.activeFrame);
+			let frame: WebElement | undefined;
+			while (Date.now() < deadline) {
+				try {
+					const frames = await this.getDriver().findElements(AbstractElement.locators.WebView.activeFrame);
+					if (frames.length > 0) {
+						frame = frames[0];
+						break;
+					}
+				} catch (e) {
+					if (!(e instanceof error.StaleElementReferenceError || e instanceof error.NoSuchElementError)) {
+						await this.getDriver().switchTo().window(this.handle);
+						throw e;
+					}
+				}
+				await this.getDriver().sleep(pollInterval);
+			}
+
+			if (!frame) {
+				// Return to top-level before throwing so callers are not left inside a frame.
+				await this.getDriver().switchTo().window(this.handle);
+				throw new Error(
+					`WebviewMixin.switchToFrame: active-frame iframe was not found within ${timeout}ms. ` +
+						`The webview content may still be loading. ` +
+						`See https://github.com/redhat-developer/vscode-extension-tester/issues/2450`,
+				);
+			}
+
 			await this.getDriver().switchTo().frame(frame);
 		}
 

@@ -272,7 +272,28 @@ export class EditorGroup extends AbstractElement {
 	async closeEditor(title: string): Promise<void> {
 		const tab = await this.getTabByTitle(title);
 		const closeButton = await tab.findElement(EditorView.locators.EditorView.closeTab);
-		await closeButton.click();
+		// VS Code renders hover tooltip overlays (<div class="hover-contents">) that can
+		// intercept the click (ElementClickInterceptedError) on CI. Retry with an
+		// increasing delay; fall back to a JS-executor click on the last attempt which
+		// bypasses overlay elements entirely.
+		const maxAttempts = 3;
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			try {
+				await closeButton.click();
+				return;
+			} catch (err: any) {
+				if (err.name !== 'ElementClickInterceptedError' || attempt === maxAttempts - 1) {
+					// On the final attempt use executeScript to bypass the overlay, then return.
+					if (err.name === 'ElementClickInterceptedError') {
+						await this.getDriver().executeScript('arguments[0].click()', closeButton);
+						return;
+					}
+					throw err;
+				}
+				// Brief back-off so the tooltip has time to dismiss before the next attempt.
+				await this.getWaitHelper().sleep(300 * (attempt + 1));
+			}
+		}
 	}
 
 	/**
