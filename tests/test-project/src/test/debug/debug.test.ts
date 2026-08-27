@@ -153,9 +153,12 @@ describe('Debugging', function () {
 		it('TextEditor: getBreakpoints works', async function () {
 			editor = (await new EditorView().openEditor('test.js')) as TextEditor;
 			const breakpoints = (await driver.wait<Breakpoint[]>(
-				async () => await editor.getBreakpoints(),
+				async () => {
+					const bps = await editor.getBreakpoints();
+					return bps.length === 2 ? bps : null;
+				},
 				10000,
-				'could not find breakpoints',
+				'could not find 2 breakpoints',
 			)) as Breakpoint[];
 			expect(breakpoints.length).equals(2);
 			expect(await breakpoints.at(0)?.getLineNumber()).equals(7);
