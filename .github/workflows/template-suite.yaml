@@ -1,0 +1,99 @@
+name: 📄 Suite CI - template
+
+on:
+  workflow_call:
+    inputs:
+      test_group:
+        required: true
+        type: string
+      nodejs:
+        required: false
+        default: "lts/*"
+        type: string
+      code_type:
+        required: false
+        default: "stable"
+        type: string
+
+jobs:
+  test:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: ubuntu-min
+            version: min
+          - os: ubuntu-latest
+            label: ubuntu-max
+            version: max
+          - os: macos-latest
+            label: macos-min
+            version: min
+          - os: macos-latest
+            label: macos-max
+            version: max
+          - os: windows-latest
+            label: windows-min
+            version: min
+          - os: windows-latest
+            label: windows-max
+            version: max
+
+    env:
+      CODE_TYPE: ${{ inputs.code_type }}
+      CODE_VERSION: ${{ matrix.version }}
+
+    steps:
+      - name: 👷🏻 Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: ⚙️ Setup NodeJS
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.nodejs }}
+          cache: npm
+
+      - name: 🔧 Install
+        run: npm ci --ignore-scripts
+
+      - name: 🔧 Build
+        run: npm run build
+
+      - name: ✨ Code Formatter - Prettier
+        run: npx prettier . --check
+
+      - name: 🔧 Install - Test Project
+        run: npm install --workspace=extester-test
+
+      - name: 🔍 Run Tests (macOS, windows)
+        if: ${{ !startsWith(matrix.os, 'ubuntu') }}
+        run: npm test
+
+      - name: ⚙️ Allow unprivileged user namespace (ubuntu)
+        if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: 🔍 Run Tests (linux)
+        if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm test
+
+      - name: 💾 Upload Screenshots
+        uses: actions/upload-artifact@v7
+        if: failure() && inputs.nodejs != 'lts/*'
+        with:
+          name: screenshots-${{ inputs.test_group }}-${{ matrix.label }}-node_${{ inputs.nodejs }}
+          path: |
+            ${{ runner.temp }}/test-resources/screenshots/**/*.png
+            ${{ runner.temp }}/test-resources/chromedriver.log
+
+      - name: 💾 Upload Screenshots
+        uses: actions/upload-artifact@v7
+        if: failure() && inputs.nodejs == 'lts/*'
+        with:
+          name: screenshots-${{ inputs.test_group }}-${{ matrix.label }}-node_lts
+          path: |
+            ${{ runner.temp }}/test-resources/screenshots/**/*.png
+            ${{ runner.temp }}/test-resources/chromedriver.log

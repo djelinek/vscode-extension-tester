@@ -1,0 +1,14 @@
+{
+  "$schema": "../../packages/extester/resources/extester.schema.json",
+  "setup": {
+    "extensionsDir": "./test-extensions",
+    "installDependencies": true
+  },
+  "run": {
+    "testFiles": ["./out/test/activityBar/**/*.test.js"],
+    "extensionsDir": "./test-extensions",
+    "cleanup": true,
+    "resources": ["."],
+    "customPageObjects": "./out/test/customPageObjects/locators.js"
+  }
+}

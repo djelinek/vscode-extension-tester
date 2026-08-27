@@ -251,7 +251,20 @@
     "lint": "eslint --fix --fix-type layout src",
     "cb-init": "echo hello_ExTester | clipboard",
     "ui-test": "npm run cb-init && extest setup-and-run --config ./extester.config.json",
-    "ui-test:coverage": "MOCHA_GREP='order|clipboard|ExtensionsView|TitleBar' MOCHA_INVERT=true extest setup-and-run --config ./extester.config.coverage.json"
+    "ui-test:coverage": "MOCHA_GREP='order|clipboard|ExtensionsView|TitleBar' MOCHA_INVERT=true extest setup-and-run --config ./extester.config.coverage.json",
+    "test:01_general": "npm run cb-init && extest setup-and-run --config ./extester.config.01_general.json",
+    "test:activityBar": "npm run cb-init && extest setup-and-run --config ./extester.config.activityBar.json",
+    "test:bottomBar": "npm run cb-init && extest setup-and-run --config ./extester.config.bottomBar.json",
+    "test:cli": "npm run cb-init && extest setup-and-run --config ./extester.config.cli.json",
+    "test:debug": "npm run cb-init && extest setup-and-run --config ./extester.config.debug.json",
+    "test:dialog": "npm run cb-init && extest setup-and-run --config ./extester.config.dialog.json",
+    "test:editor": "npm run cb-init && extest setup-and-run --config ./extester.config.editor.json",
+    "test:menu": "npm run cb-init && extest setup-and-run --config ./extester.config.menu.json",
+    "test:statusBar": "npm run cb-init && extest setup-and-run --config ./extester.config.statusBar.json",
+    "test:system": "npm run cb-init && extest setup-and-run --config ./extester.config.system.json",
+    "test:webview": "npm run cb-init && extest setup-and-run --config ./extester.config.webview.json",
+    "test:workbench": "npm run cb-init && extest setup-and-run --config ./extester.config.workbench.json",
+    "test:xsideBar": "npm run cb-init && extest setup-and-run --config ./extester.config.xsideBar.json"
   },
   "devDependencies": {
     "chai": "^4.5.0",
