@@ -40,8 +40,6 @@ describe('Extension Editor', function () {
 	let extensionsView: SideBarView;
 	let item: ExtensionsViewItem;
 
-	let section: ExtensionsViewSection;
-
 	let extensionEditor: ExtensionEditorView;
 	let extensionEditorDetails: ExtensionEditorDetailsSection;
 
@@ -49,9 +47,8 @@ describe('Extension Editor', function () {
 		this.timeout(20000);
 
 		driver = VSBrowser.instance.driver;
-		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-folder'), async () => {
-			await driver.sleep(3_000);
-		});
+		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-folder'));
+		await VSBrowser.instance.waitForWorkbench();
 		viewControl = (await new ActivityBar().getViewControl('Extensions')) as ViewControl;
 		extensionsView = await viewControl.openView();
 		await driver.wait(async function () {
@@ -63,14 +60,29 @@ describe('Extension Editor', function () {
 		await driver.wait(async function () {
 			return (await view.getContent().getSections()).length > 0;
 		});
-		section = (await view.getContent().getSection('Installed')) as ExtensionsViewSection;
-
 		await driver.wait(async function () {
-			item = (await section.findItem(`@installed ${pjson.displayName}`)) as ExtensionsViewItem;
-			return item !== undefined;
+			try {
+				const currentView = await viewControl.openView();
+				const currentSection = (await currentView.getContent().getSection('Installed')) as ExtensionsViewSection;
+				item = (await currentSection.findItem(`@installed ${pjson.displayName}`)) as ExtensionsViewItem;
+				return item !== undefined;
+			} catch (e: any) {
+				if (e.name === 'StaleElementReferenceError') {
+					return false;
+				}
+				throw e;
+			}
 		});
 
 		await item.click();
+		await driver.wait(
+			async () => {
+				const titles = await new EditorView().getOpenEditorTitles();
+				return titles.some((title) => title.includes('Extension:'));
+			},
+			10000,
+			'Extension editor did not open after click',
+		);
 	});
 
 	// ensure clean workbench

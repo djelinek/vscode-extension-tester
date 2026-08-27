@@ -38,27 +38,38 @@ describe('ContentAssist', function () {
 	let assist: ContentAssist;
 	let editor: TextEditor;
 
-	before(async () => {
-		this.timeout(30000);
-		const wait = getWaitHelper();
-		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-file.ts'), async () => {
-			await wait.sleep(3000);
-		});
+	before(async function (this: Mocha.Context) {
+		this.timeout(60000);
+		// Ensure the driver is at the top-level window context before doing anything,
+		// in case the previous test suite left it inside a webview frame.
+		await VSBrowser.instance.driver.switchTo().defaultContent();
+		// Close all editors first to ensure a clean state regardless of what ran before.
+		await new EditorView().closeAllEditors();
+		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-file.ts'));
 		await VSBrowser.instance.waitForWorkbench();
 		const ew = new EditorView();
+		await waitFor(
+			async () => {
+				const titles = await ew.getOpenEditorTitles();
+				return titles.includes('test-file.ts');
+			},
+			{ timeout: 30000, message: 'test-file.ts editor did not open' },
+		);
+
 		try {
 			await ew.closeEditor('Welcome');
 		} catch (error) {
 			// continue - Welcome page is not displayed
 		}
 		editor = (await ew.openEditor('test-file.ts')) as TextEditor;
-		// Wait for JS/TS language features to initialize
+		// Wait for JS/TS language features to initialize. Use a fixed timeout so the budget
+		// is not consumed by earlier steps in this same before() hook.
 		await waitFor(
 			async () => {
 				const progress = await new StatusBar().getItem('Initializing JS/TS language features');
 				return !progress;
 			},
-			{ timeout: this.timeout() - 2000, message: 'Initializing JS/TS language features was not finished yet!' },
+			{ timeout: 45000, message: 'Initializing JS/TS language features was not finished yet!' },
 		);
 	});
 
@@ -107,21 +118,31 @@ describe('TextEditor', function () {
 
 	const testText = process.platform === 'win32' ? `line1\r\nline2\r\nline3` : `line1\nline2\nline3`;
 
-	before(async () => {
-		this.timeout(8000);
+	before(async function (this: Mocha.Context) {
+		this.timeout(30000);
 		await new Workbench().executeCommand('Create: New File...');
 		await (await InputBox.create()).selectQuickPick('Text File');
-		// Wait for editor to be ready
+		view = new EditorView();
+		// Wait for an untitled editor tab to be active before proceeding.
 		await waitFor(
 			async () => {
-				const ew = new EditorView();
-				const titles = await ew.getOpenEditorTitles();
-				return titles.length > 0;
+				const titles = await view.getOpenEditorTitles();
+				return titles.some((t) => t.startsWith('Untitled'));
 			},
-			{ timeout: 5000, message: 'Editor did not open' },
+			{ timeout: 15000, message: 'Untitled editor did not open' },
 		);
-		view = new EditorView();
 		editor = new TextEditor(view);
+		// Confirm the editor element is visible before interacting with it.
+		await waitFor(
+			async () => {
+				try {
+					return await editor.isDisplayed();
+				} catch {
+					return false;
+				}
+			},
+			{ timeout: 10000, message: 'New file editor was not visible' },
+		);
 
 		await new StatusBar().openLanguageSelection();
 		const input = await InputBox.create();
@@ -129,7 +150,19 @@ describe('TextEditor', function () {
 		await input.confirm();
 	});
 
-	after(async function () {
+	after(async function (this: Mocha.Context) {
+		this.timeout(15000);
+		// Ensure the editor is both visible and enabled before attempting to clear it.
+		await waitFor(
+			async () => {
+				try {
+					return (await editor.isDisplayed()) && (await editor.isEnabled());
+				} catch {
+					return false;
+				}
+			},
+			{ timeout: 8000, message: 'Editor was not interactable before clearText' },
+		);
 		await editor.clearText();
 		await view.closeAllEditors();
 	});
@@ -199,15 +232,15 @@ describe('TextEditor', function () {
 				let editor: TextEditor;
 				let ew: EditorView;
 
-				beforeEach(async function () {
-					const wait = getWaitHelper();
-					await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', param.file), async () => {
-						await wait.sleep(3000);
-					});
+				beforeEach(async function (this: Mocha.Context) {
+					this.timeout(40000);
+					await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', param.file));
 					ew = new EditorView();
-					// Wait for editor to be available
+					// Wait for editor to be available. Use a generous timeout on slow CI
+					// runners (especially macOS) where the CLI open command can take longer
+					// than expected to be reflected in the editor tab list.
 					await waitFor(async () => (await ew.getOpenEditorTitles()).includes(param.file), {
-						timeout: 10_000,
+						timeout: 30_000,
 						message: `Unable to find opened editor with title '${param.file}'`,
 					});
 					editor = (await ew.openEditor(param.file)) as TextEditor;
@@ -396,23 +429,25 @@ describe('TextEditor', function () {
 	});
 
 	describe('CodeLens', function () {
-		before(async function () {
+		before(async function (this: Mocha.Context) {
+			this.timeout(20000);
 			const wait = getWaitHelper();
 			await new Workbench().executeCommand('Enable CodeLens');
 			// older versions of vscode don't fire the update event immediately, give it some encouragement
 			// otherwise the lenses end up empty
 			await new Workbench().executeCommand('Enable CodeLens');
-			// Wait for CodeLens to appear
+			// Wait for CodeLens to appear — use a generous timeout for slow CI runners
 			await wait.forCondition(
 				async () => {
 					const lenses = await editor.getCodeLenses();
 					return lenses.length > 0;
 				},
-				{ timeout: 5000, message: 'CodeLens did not appear' },
+				{ timeout: 15000, message: 'CodeLens did not appear' },
 			);
 		});
 
-		after(async function () {
+		after(async function (this: Mocha.Context) {
+			this.timeout(15000);
 			await new Workbench().executeCommand('Disable Codelens');
 			const nc = await new Workbench().openNotificationsCenter();
 			await nc.clearAllNotifications();
