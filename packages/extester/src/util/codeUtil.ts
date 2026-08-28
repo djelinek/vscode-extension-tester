@@ -177,6 +177,19 @@ export class CodeUtil {
 				console.log(`Downloaded VS Code into ${zipPath}`);
 			}
 
+			// A corrupted archive (truncated download, stale cache entry) produces a broken
+			// VS Code install that fails much later in confusing ways ("installation appears
+			// to be corrupt", extension host not starting). Verify the archive up front and
+			// re-download once before unpacking.
+			if (!this.verifyArchiveIntegrity(zipPath)) {
+				console.warn(`VS Code archive ${fileName} is corrupted, re-downloading...`);
+				await fs.remove(zipPath);
+				await Download.getFile(url, zipPath, true);
+				if (!this.verifyArchiveIntegrity(zipPath)) {
+					throw new Error(`Downloaded VS Code archive is corrupted: ${zipPath}`);
+				}
+			}
+
 			const tempPrefix = path.join(this.downloadFolder, 'vscode-temp-');
 			console.log(`Unpacking VS Code into ${this.downloadFolder}`);
 			const target = await fs.mkdtemp(tempPrefix);
@@ -221,6 +234,28 @@ export class CodeUtil {
 			}
 		} else {
 			console.log('VS Code exists in local cache, skipping download');
+		}
+	}
+
+	/**
+	 * Check that a downloaded VS Code archive is a readable, complete archive.
+	 * Returns true when the archive passes the check or when no suitable
+	 * verification tool is available on the current platform.
+	 */
+	private verifyArchiveIntegrity(archive: string): boolean {
+		if (process.platform === 'win32') {
+			// No archive test tool is guaranteed to exist on Windows — skip verification
+			return true;
+		}
+		try {
+			if (archive.endsWith('.tar.gz')) {
+				childProcess.execSync(`tar -tzf "${archive}"`, { stdio: 'ignore', timeout: 120_000 });
+			} else {
+				childProcess.execSync(`unzip -t -qq "${archive}"`, { stdio: 'ignore', timeout: 120_000 });
+			}
+			return true;
+		} catch {
+			return false;
 		}
 	}
 
