@@ -84,14 +84,6 @@ export class VSRunner {
 
 			testFiles.forEach((file) => this.mocha.addFile(file));
 
-			this.mocha.suite.beforeEach(async function () {
-				try {
-					await browser.driver.switchTo().defaultContent();
-				} catch {
-					// driver may not be ready yet during beforeAll
-				}
-			});
-
 			this.mocha.suite.afterEach(async function () {
 				if (this.currentTest && this.currentTest.state !== 'passed') {
 					try {
