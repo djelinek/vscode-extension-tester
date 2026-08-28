@@ -108,6 +108,13 @@ export abstract class Input extends AbstractElement {
 		const inputEl = await this.findElement(Input.locators.Input.inputBox).findElement(Input.locators.Input.input);
 		await inputEl.sendKeys(Key.ENTER);
 
+		// When the typed path uniquely resolves the target, the first Enter both
+		// navigates and confirms — the picker closes on its own and no second step
+		// is needed (attempting one would hit a hidden input).
+		if (!(await this.isPickerOpen())) {
+			return;
+		}
+
 		// Step 2 — click the OK button to confirm and close the dialog.
 		// Use a JS click to bypass any overlay that may intercept a normal WebDriver click.
 		// Falls back to a second Enter if no matching button is found.
@@ -125,7 +132,30 @@ export abstract class Input extends AbstractElement {
 		} catch (error) {
 			// ignore if button is not found or stale
 		}
-		await inputEl.sendKeys(Key.ENTER);
+		if (!(await this.isPickerOpen())) {
+			return;
+		}
+		try {
+			await inputEl.sendKeys(Key.ENTER);
+		} catch (err) {
+			// The picker can close in the instant between the check above and the
+			// keystroke — a failure only matters while the picker is still open.
+			if (await this.isPickerOpen()) {
+				throw err;
+			}
+		}
+	}
+
+	/**
+	 * Best-effort check whether this input/picker widget is still displayed.
+	 * A hidden, detached or stale widget counts as closed.
+	 */
+	private async isPickerOpen(): Promise<boolean> {
+		try {
+			return await this.isDisplayed();
+		} catch {
+			return false;
+		}
 	}
 
 	/**
