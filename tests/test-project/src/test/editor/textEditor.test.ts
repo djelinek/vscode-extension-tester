@@ -103,7 +103,10 @@ describe('ContentAssist', function () {
 	});
 
 	it('getItem can find an item beyond visible range', async function () {
-		const item = await assist.getItem('Buffer');
+		// Use a core ES-lib global that is always present in the suggestion list.
+		// Node-only globals (e.g. 'Buffer') depend on @types/node being available
+		// via automatic type acquisition, which is asynchronous and network-bound.
+		const item = await assist.getItem('Math');
 		expect(item).not.undefined;
 	}).timeout(15000);
 
