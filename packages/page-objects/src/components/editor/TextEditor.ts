@@ -1118,8 +1118,12 @@ export class FindWidget extends AbstractElement {
 
 		const btn = await element.findElement(FindWidget.locators.FindWidget.button(title));
 		await btn.click();
-		// Wait for button action to complete
-		await this.getWaitHelper().forStable(element, { timeout: 500 });
+		// Give the widget a moment to settle after the action (animations, relayout).
+		// Best-effort: a slow animation must not fail the interaction that already
+		// happened, so a stability timeout is not an error here.
+		await this.getWaitHelper()
+			.forStable(element, { timeout: 2000 })
+			.catch(() => undefined);
 	}
 
 	private async setText(text: string, composite: WebElement) {
