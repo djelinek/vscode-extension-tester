@@ -29,6 +29,8 @@ import {
 	WebDriver,
 	Workbench,
 	BottomBarPanel,
+	after,
+	before,
 } from 'vscode-extension-tester';
 import * as pjson from '../../../package.json';
 import * as path from 'path';
@@ -43,7 +45,7 @@ describe('Extension Editor', function () {
 	let extensionEditor: ExtensionEditorView;
 	let extensionEditorDetails: ExtensionEditorDetailsSection;
 
-	before(async function () {
+	before(async function (this: Mocha.Context) {
 		this.timeout(60000);
 
 		driver = VSBrowser.instance.driver;
@@ -80,7 +82,16 @@ describe('Extension Editor', function () {
 				try {
 					await item.click();
 				} catch {
-					// click may fail transiently — retry on next poll
+					// The extensions list re-renders asynchronously (marketplace queries,
+					// filter refreshes) and stales the item reference — re-locate it
+					// before the next attempt instead of clicking a dead element.
+					try {
+						const currentView = await viewControl.openView();
+						const currentSection = (await currentView.getContent().getSection('Installed')) as ExtensionsViewSection;
+						item = (await currentSection.findItem(`@installed ${pjson.displayName}`)) as ExtensionsViewItem;
+					} catch {
+						// list may still be refreshing — retry on next poll
+					}
 				}
 				const titles = await new EditorView().getOpenEditorTitles();
 				return titles.some((title) => title.includes('Extension:'));
@@ -91,7 +102,7 @@ describe('Extension Editor', function () {
 	});
 
 	// ensure clean workbench
-	before(async function () {
+	before(async function (this: Mocha.Context) {
 		this.timeout(15000);
 		const panel = new BottomBarPanel();
 		if (await panel.isDisplayed()) {
@@ -104,9 +115,13 @@ describe('Extension Editor', function () {
 		}
 	});
 
-	after(async function () {
+	after(async function (this: Mocha.Context) {
 		this.timeout(30000);
-		await viewControl.closeView();
+		// viewControl stays undefined when the before() hook failed early —
+		// cleanup must not mask the original failure with a TypeError.
+		if (viewControl) {
+			await viewControl.closeView();
+		}
 		await new EditorView().closeAllEditors();
 		// Re-open the original workspace. The first before() hook changed
 		// the workspace to test-folder via openResources — subsequent test
@@ -117,7 +132,7 @@ describe('Extension Editor', function () {
 	});
 
 	describe('ExtensionEditorView', function () {
-		before(async function () {
+		before(async function (this: Mocha.Context) {
 			extensionEditor = new ExtensionEditorView();
 		});
 
@@ -156,7 +171,7 @@ describe('Extension Editor', function () {
 	});
 
 	describe('ExtensionEditorDetailsSections', function () {
-		before(async function () {
+		before(async function (this: Mocha.Context) {
 			await extensionEditor.switchToTab('Details');
 			extensionEditorDetails = new ExtensionEditorDetailsSection();
 		});
