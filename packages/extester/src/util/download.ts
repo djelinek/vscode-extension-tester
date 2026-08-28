@@ -20,7 +20,7 @@ import { promisify } from 'util';
 import stream from 'stream';
 import { HttpProxyAgent, HttpsProxyAgent } from 'hpagent';
 
-const retryCount = 3;
+const retryCount = 5;
 const httpProxyAgent = !process.env.HTTP_PROXY
 	? undefined
 	: new HttpProxyAgent({
@@ -47,6 +47,24 @@ const options = {
 	},
 	retry: {
 		limit: retryCount,
+		// The default errorCodes list does not include the content-length mismatch
+		// error that `got` raises as ERR_HTTP_CONTENT_LENGTH_MISMATCH (a ReadError).
+		// This intermittent network error is the root cause of flaky VS Code downloads
+		// on CI runners, so we add it (and its generic fallback) here so that got's
+		// built-in exponential-backoff retry fires automatically on these transient
+		// failures instead of surfacing them as fatal errors.
+		errorCodes: [
+			'ETIMEDOUT',
+			'ECONNRESET',
+			'EADDRINUSE',
+			'ECONNREFUSED',
+			'EPIPE',
+			'ENOTFOUND',
+			'ENETUNREACH',
+			'EAI_AGAIN',
+			'ERR_HTTP_CONTENT_LENGTH_MISMATCH',
+			'ERR_READING_RESPONSE_STREAM',
+		],
 	},
 };
 
@@ -71,7 +89,7 @@ export class Download {
 		const got = (await import('got')).default;
 		const dlStream = got.stream(uri, options);
 		// needed in order to enable retry feature:
-		dlStream.once('retry', (newRetryCount: number, error) => {
+		dlStream.on('retry', (newRetryCount: number, error) => {
 			console.warn(`retry(${newRetryCount}): Failed getting ${uri} due to ${error}`);
 		});
 		if (progress) {
