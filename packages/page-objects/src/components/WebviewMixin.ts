@@ -94,20 +94,18 @@ export default function <TBase extends Constructor<WebviewMixable>>(Base: TBase)
 		 * @throws Error when the webview iframe cannot be located within the timeout
 		 */
 		async switchToFrame(timeout: number = 5000): Promise<void> {
-			// Capture the window handle before any frame switch so switchBack()
-			// always has the correct top-level context regardless of how we exit.
 			if (!this.handle) {
 				this.handle = await this.getDriver().getWindowHandle();
 			}
 
 			const deadline = Date.now() + timeout;
 			const pollInterval = 200;
+			const minPhase2Budget = Math.min(5000, Math.floor(timeout / 3));
 
-			// Phase 1 — poll for the outer webview iframe under the shared deadline.
-			// The iframe may not yet be in the DOM immediately after the command that
-			// opened the panel resolves (VS Code renders it asynchronously).
+			// Phase 1 — poll for the outer webview iframe. Stop early to
+			// guarantee at least minPhase2Budget ms for the inner-frame lookup.
 			let view: WebElement | undefined;
-			while (Date.now() < deadline) {
+			while (Date.now() < deadline - minPhase2Budget) {
 				try {
 					view = await this.getViewToSwitchTo();
 				} catch (e) {
@@ -130,10 +128,18 @@ export default function <TBase extends Constructor<WebviewMixable>>(Base: TBase)
 			}
 
 			// Phase 2 — switch into the outer iframe, then poll for the inner
-			// active-frame under the remaining budget of the same shared deadline.
-			// On any failure we return to the top-level window before rethrowing so
-			// the driver context is always clean when this method throws.
-			await this.getDriver().switchTo().frame(view);
+			// active-frame under the remaining budget (at least minPhase2Budget ms).
+			try {
+				await this.getDriver().switchTo().frame(view);
+			} catch (e) {
+				if (e instanceof error.StaleElementReferenceError) {
+					throw new Error(
+						`WebviewMixin.switchToFrame: outer iframe became stale during frame switch. ` +
+							`See https://github.com/redhat-developer/vscode-extension-tester/issues/2450`,
+					);
+				}
+				throw e;
+			}
 
 			let frame: WebElement | undefined;
 			while (Date.now() < deadline) {

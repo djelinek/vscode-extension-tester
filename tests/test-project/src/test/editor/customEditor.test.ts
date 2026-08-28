@@ -26,36 +26,27 @@ describe('CustomEditor', () => {
 	const CUSTOM_TITLE: string = 'example.cscratch';
 
 	before(async function () {
-		this.timeout(90000);
+		this.timeout(70000);
 		// Ensure the driver is at the top-level window context before doing anything,
 		// in case a previous test suite left it inside a webview frame.
 		await VSBrowser.instance.driver.switchTo().defaultContent();
-		await new EditorView().closeAllEditors();
-
-		// Open the custom editor file. On macOS-min the test extension may
-		// need extra time to activate and register the custom editor provider,
-		// so we retry the open if the tab doesn't appear quickly.
-		const filePath = path.resolve(__dirname, '..', '..', '..', 'resources', CUSTOM_TITLE);
+		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', CUSTOM_TITLE));
 		const ew = new EditorView();
 		await waitFor(
 			async () => {
-				try {
-					await VSBrowser.instance.openResources(filePath);
-				} catch {
-					// CLI open may fail transiently
-				}
 				const titles = await ew.getOpenEditorTitles();
 				return titles.includes(CUSTOM_TITLE);
 			},
-			{ timeout: 30000, pollInterval: 10000, message: `Unable to find opened custom editor with title '${CUSTOM_TITLE}'` },
+			{ timeout: 20000, message: `Unable to find opened custom editor with title '${CUSTOM_TITLE}'` },
 		);
 		editor = new CustomEditor();
 
-		// switchToFrame polls for both the outer iframe.webview.ready and the
-		// inner active-frame under a shared deadline. Use a generous timeout
-		// to account for slow extension activation on macOS-min.
+		// Wait for the webview iframe to be fully ready before any test uses it.
+		// switchToFrame() polls for both the outer and inner active-frame iframes
+		// under a single shared deadline, so a single call with a generous timeout
+		// is both correct and sufficient — no retry loop needed in the test.
 		const webview = editor.getWebView();
-		await webview.switchToFrame(50000);
+		await webview.switchToFrame(30000);
 		await webview.switchBack();
 	});
 
@@ -66,9 +57,9 @@ describe('CustomEditor', () => {
 	});
 
 	it('webview is available', async function () {
-		this.timeout(45000);
+		this.timeout(20000);
 		const webview = editor.getWebView();
-		await webview.switchToFrame(30000);
+		await webview.switchToFrame(10000);
 		try {
 			const btn = await webview.findWebElement(By.className('add-button'));
 			const wait = getWaitHelper();

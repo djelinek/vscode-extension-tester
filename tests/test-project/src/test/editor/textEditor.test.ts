@@ -40,24 +40,21 @@ describe('ContentAssist', function () {
 	let editor: TextEditor;
 
 	before(async function (this: Mocha.Context) {
-		this.timeout(180000);
+		this.timeout(120000);
 		// Ensure the driver is at the top-level window context before doing anything,
 		// in case the previous test suite left it inside a webview frame.
 		await VSBrowser.instance.driver.switchTo().defaultContent();
 		// Close all editors first to ensure a clean state regardless of what ran before.
 		await new EditorView().closeAllEditors();
-		const testFilePath = path.resolve(__dirname, '..', '..', '..', 'resources', 'test-file.ts');
+		await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', 'test-file.ts'));
+		await VSBrowser.instance.waitForWorkbench();
 		const ew = new EditorView();
-		// Open the file via CLI. On macOS CI the CLI command can silently
-		// fail when VS Code is still settling after a workspace change, so
-		// retry the open if the tab doesn't appear within 30s.
 		await waitFor(
 			async () => {
-				await VSBrowser.instance.openResources(testFilePath);
 				const titles = await ew.getOpenEditorTitles();
 				return titles.includes('test-file.ts');
 			},
-			{ timeout: 60000, pollInterval: 10000, message: 'test-file.ts editor did not open' },
+			{ timeout: 60000, message: 'test-file.ts editor did not open' },
 		);
 
 		try {
@@ -66,67 +63,23 @@ describe('ContentAssist', function () {
 			// continue - Welcome page is not displayed
 		}
 		editor = (await ew.openEditor('test-file.ts')) as TextEditor;
-
-		// Wait for JS/TS language features to fully initialize.
-		// Phase 1: Try to observe the "Initializing JS/TS language features"
-		// status bar item appearing. On CI the language service can start late,
-		// so we give it up to 15s to show up. If it never appears, the service
-		// may have already finished (or not started); we verify via phase 3.
-		const statusBar = new StatusBar();
-		let sawInitializing = false;
-		try {
-			await waitFor(
-				async () => {
-					const progress = await statusBar.getItem('Initializing JS/TS language features');
-					if (progress) {
-						sawInitializing = true;
-					}
-					return sawInitializing;
-				},
-				{ timeout: 15000, pollInterval: 500 },
-			);
-		} catch {
-			// Item never appeared — may have already finished or not started yet
-		}
-		// Phase 2: If we saw the initializing item, wait for it to disappear.
-		if (sawInitializing) {
-			await waitFor(async () => !(await statusBar.getItem('Initializing JS/TS language features')), {
-				timeout: 60000,
-				message: 'Initializing JS/TS language features was not finished yet!',
-			});
-		}
-		// Phase 3: Verify content assist actually returns suggestions.
-		// This is the ground-truth readiness check — the status bar item can
-		// appear and disappear too quickly to observe on fast machines, or
-		// not appear at all on CI until well after we checked.
-		const wait = getWaitHelper();
+		// Wait for JS/TS language features to initialize. Use a fixed timeout so the budget
+		// is not consumed by earlier steps in this same before() hook.
 		await waitFor(
 			async () => {
-				try {
-					const testAssist = (await editor.toggleContentAssist(true)) as ContentAssist;
-					const items = await testAssist.getItems();
-					await editor.toggleContentAssist(false);
-					await wait.sleep(300);
-					return items.length > 0;
-				} catch {
-					try {
-						await editor.toggleContentAssist(false);
-					} catch {
-						// ignore
-					}
-					return false;
-				}
+				const progress = await new StatusBar().getItem('Initializing JS/TS language features');
+				return !progress;
 			},
-			{ timeout: 60000, pollInterval: 5000, message: 'Content assist produced no suggestions — TypeScript language service may not be ready' },
+			{ timeout: 45000, message: 'Initializing JS/TS language features was not finished yet!' },
 		);
 	});
 
 	beforeEach(async function (this: Mocha.Context) {
-		this.timeout(30000);
+		this.timeout(15000);
 		const wait = getWaitHelper();
 		assist = (await editor.toggleContentAssist(true)) as ContentAssist;
 		// Wait for content assist to stabilize
-		await wait.forStable(assist, { timeout: 5000 });
+		await wait.forStable(assist, { timeout: 2500 });
 	});
 
 	afterEach(async function () {
@@ -145,22 +98,19 @@ describe('ContentAssist', function () {
 	});
 
 	it('getItem retrieves suggestion by text', async function () {
-		this.timeout(30000);
 		const item = await assist.getItem('AbortController');
 		expect(await item?.getLabel()).equals('AbortController');
 	});
 
 	it('getItem can find an item beyond visible range', async function () {
-		this.timeout(30000);
 		const item = await assist.getItem('Buffer');
 		expect(item).not.undefined;
-	});
+	}).timeout(15000);
 
 	it('hasItem finds items beyond visible range', async function () {
-		this.timeout(30000);
 		const exists = await assist.hasItem('Error');
 		expect(exists).is.true;
-	});
+	}).timeout(15000);
 });
 
 describe('TextEditor', function () {
@@ -309,21 +259,15 @@ describe('TextEditor', function () {
 
 				beforeEach(async function (this: Mocha.Context) {
 					this.timeout(90000);
-					const filePath = path.resolve(__dirname, '..', '..', '..', 'resources', param.file);
+					await VSBrowser.instance.openResources(path.resolve(__dirname, '..', '..', '..', 'resources', param.file));
 					ew = new EditorView();
-					// Open the file with retry. On macOS CI the CLI open command
-					// can fail silently, especially after a workspace folder change.
-					await waitFor(
-						async () => {
-							try {
-								await VSBrowser.instance.openResources(filePath);
-							} catch {
-								// CLI open may fail transiently
-							}
-							return (await ew.getOpenEditorTitles()).includes(param.file);
-						},
-						{ timeout: 60_000, pollInterval: 10000, message: `Unable to find opened editor with title '${param.file}'` },
-					);
+					// Wait for editor to be available. Use a generous timeout on slow CI
+					// runners (especially macOS) where the CLI open command can take longer
+					// than expected to be reflected in the editor tab list.
+					await waitFor(async () => (await ew.getOpenEditorTitles()).includes(param.file), {
+						timeout: 60_000,
+						message: `Unable to find opened editor with title '${param.file}'`,
+					});
 					editor = (await ew.openEditor(param.file)) as TextEditor;
 				});
 

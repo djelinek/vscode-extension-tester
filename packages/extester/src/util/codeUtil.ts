@@ -269,7 +269,7 @@ export class CodeUtil {
 	open(...paths: string[]): void {
 		const segments = paths.map((f) => `"${f}"`).join(' ');
 		const command = `${this.getCliInitCommand()} -r ${segments} --user-data-dir="${path.join(this.downloadFolder, 'settings')}"`;
-		childProcess.execSync(command);
+		childProcess.execSync(command, { timeout: 30000 });
 	}
 
 	/**

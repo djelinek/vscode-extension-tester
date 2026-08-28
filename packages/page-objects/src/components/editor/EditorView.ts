@@ -72,7 +72,8 @@ export class EditorView extends AbstractElement {
 			return groups[groupIndex].closeAllEditors();
 		}
 
-		while (groups.length > 0 && (await groups[0].getOpenEditorTitles()).length > 0) {
+		const deadline = Date.now() + 60000;
+		while (groups.length > 0 && (await groups[0].getOpenEditorTitles()).length > 0 && Date.now() < deadline) {
 			await groups[0].closeAllEditors();
 			// Brief wait for DOM to settle after closing editors
 			await this.getWaitHelper().sleep(500);
@@ -301,8 +302,10 @@ export class EditorGroup extends AbstractElement {
 	 * @returns Promise resolving once all tabs have had their close button pressed
 	 */
 	async closeAllEditors(): Promise<void> {
+		const deadline = Date.now() + 30000;
 		let titles = await this.getOpenEditorTitles();
-		while (titles.length > 0) {
+		while (titles.length > 0 && Date.now() < deadline) {
+			const previousCount = titles.length;
 			await this.closeEditor(titles[0]);
 			try {
 				// check if the group still exists
@@ -311,6 +314,18 @@ export class EditorGroup extends AbstractElement {
 				break;
 			}
 			titles = await this.getOpenEditorTitles();
+			if (titles.length >= previousCount) {
+				try {
+					await this.getDriver().actions().sendKeys('\uE00C').perform();
+					await this.getWaitHelper().sleep(500);
+				} catch {
+					/* ignore */
+				}
+				titles = await this.getOpenEditorTitles();
+				if (titles.length >= previousCount) {
+					break;
+				}
+			}
 		}
 	}
 

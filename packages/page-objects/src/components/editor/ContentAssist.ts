@@ -33,32 +33,28 @@ export class ContentAssist extends Menu {
 	 * @param name name/text to search by
 	 * @returns Promise resolving to ContentAssistItem object if found, undefined otherwise
 	 */
-	async getItem(name: string): Promise<ContentAssistItem | undefined> {
+	async getItem(name: string, timeout: number = 30000): Promise<ContentAssistItem | undefined> {
+		const deadline = Date.now() + timeout;
 		let lastItem = false;
 		const scrollable = await this.findElement(ContentAssist.locators.ContentAssist.itemList);
 
-		// Scroll to the top and wait for the first virtual row (data-index=0) to appear.
-		// On slow CI runners the list may not have rendered its first row yet.
 		let firstItem = await this.findElements(ContentAssist.locators.ContentAssist.firstItem);
-		while (firstItem.length < 1) {
+		while (firstItem.length < 1 && Date.now() < deadline) {
 			await scrollable.sendKeys(Key.PAGE_UP, Key.NULL);
 			await this.getWaitHelper().sleep(200);
 			firstItem = await this.findElements(ContentAssist.locators.ContentAssist.firstItem);
 		}
 
-		// After reaching the top, wait for at least one visible item to be rendered.
-		// isLoaded() only checks the message element — it returns true even when the
-		// item rows are empty, so we need an explicit non-empty check here.
 		await this.getDriver().wait(
 			async () => {
 				const rows = await this.findElements(ContentAssist.locators.ContentAssist.itemRow);
 				return rows.length > 0;
 			},
-			10000,
-			'Content assist item list did not populate within 10s',
+			Math.min(10000, Math.max(1000, deadline - Date.now())),
+			'Content assist item list did not populate',
 		);
 
-		while (!lastItem) {
+		while (!lastItem && Date.now() < deadline) {
 			const items = await this.getItems();
 
 			for (const item of items) {
@@ -69,8 +65,6 @@ export class ContentAssist extends Menu {
 			}
 			if (!lastItem) {
 				await scrollable.sendKeys(Key.PAGE_DOWN);
-				// Wait for the virtual list to finish rendering the next page.
-				// 300ms is a safe minimum on slow macOS CI runners.
 				await this.getWaitHelper().sleep(300);
 			}
 		}
