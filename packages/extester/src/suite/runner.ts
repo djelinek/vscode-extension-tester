@@ -85,7 +85,9 @@ export class VSRunner {
 			testFiles.forEach((file) => this.mocha.addFile(file));
 
 			this.mocha.suite.afterEach(async function () {
-				if (this.currentTest && this.currentTest.state !== 'passed') {
+				// Screenshot only genuinely failed tests — 'pending' (skipped) tests
+				// would otherwise produce misleading failure screenshots in CI artifacts.
+				if (this.currentTest && this.currentTest.state === 'failed') {
 					try {
 						const filename = sanitize(this.currentTest.fullTitle());
 						await browser.takeScreenshot(filename);
