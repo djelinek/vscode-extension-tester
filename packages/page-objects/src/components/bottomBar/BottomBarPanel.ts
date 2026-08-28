@@ -47,7 +47,7 @@ export class BottomBarPanel extends AbstractElement {
 				await this.wait();
 			} else {
 				await this.closePanel();
-				await this.getDriver().wait(until.elementIsNotVisible(this));
+				await this.getDriver().wait(until.elementIsNotVisible(this), 5_000);
 			}
 		}
 	}
