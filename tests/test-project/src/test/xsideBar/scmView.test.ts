@@ -52,7 +52,11 @@ import { waitFor } from '../testUtils';
 	});
 
 	after(() => {
-		fs.unlinkSync(path.resolve('.', 'testfile'));
+		try {
+			fs.unlinkSync(path.resolve('.', 'testfile'));
+		} catch {
+			// the file may not exist if the before hook failed part-way
+		}
 	});
 
 	it('getProviders works', async () => {
