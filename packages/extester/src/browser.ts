@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as fs from 'fs-extra';
 import { satisfies } from 'compare-versions';
-import { WebDriver, Builder, initPageObjects, logging, By, Browser, EditorView } from '@redhat-developer/page-objects';
+import { WebDriver, Builder, initPageObjects, logging, By, Browser, EditorView, Workbench } from '@redhat-developer/page-objects';
 import { Options, ServiceBuilder } from 'selenium-webdriver/chrome';
 import { getLocatorsPath } from '@redhat-developer/locators';
 import { CodeUtil, CustomPageObjectsOptions, ReleaseQuality } from './util/codeUtil';
@@ -414,8 +414,19 @@ export class VSBrowser {
 			console.warn(`Opened resources did not appear in the editor, retrying: ${files.join(', ')}`);
 			code.open(...paths);
 			await this.waitForWorkbench(undefined);
-			if (!(await this.filesOpenedInEditor(files, 15_000))) {
-				throw new Error(`Failed to open resource(s) in the editor: ${files.join(', ')}`);
+			if (!(await this.filesOpenedInEditor(files, 10_000))) {
+				// The running instance can drop CLI open requests entirely mid-session
+				// (observed repeatedly on macOS). Fall back to opening each file through
+				// the workbench quick open box, which does not depend on the CLI channel.
+				console.warn(`CLI open request was dropped, opening file(s) via quick open: ${files.join(', ')}`);
+				for (const file of files) {
+					const input = await new Workbench().openCommandPrompt();
+					await input.setText(file);
+					await input.confirm();
+				}
+				if (!(await this.filesOpenedInEditor(files, 10_000))) {
+					throw new Error(`Failed to open resource(s) in the editor: ${files.join(', ')}`);
+				}
 			}
 		}
 	}
