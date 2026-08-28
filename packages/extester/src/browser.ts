@@ -227,11 +227,11 @@ export class VSBrowser {
 			process.exit(exitCode);
 		};
 
-		process.on('SIGINT', () => emergencyShutdown('SIGINT', 130));
-		process.on('SIGTERM', () => emergencyShutdown('SIGTERM', 143));
+		process.on('SIGINT', () => void emergencyShutdown('SIGINT', 130));
+		process.on('SIGTERM', () => void emergencyShutdown('SIGTERM', 143));
 		process.on('uncaughtException', (err) => {
 			console.error('Uncaught exception:', err);
-			emergencyShutdown('uncaughtException', 1);
+			void emergencyShutdown('uncaughtException', 1);
 		});
 	}
 
