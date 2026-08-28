@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as fs from 'fs-extra';
 import { satisfies } from 'compare-versions';
-import { WebDriver, Builder, until, initPageObjects, logging, By, Browser } from '@redhat-developer/page-objects';
+import { WebDriver, Builder, initPageObjects, logging, By, Browser, EditorView } from '@redhat-developer/page-objects';
 import { Options, ServiceBuilder } from 'selenium-webdriver/chrome';
 import { getLocatorsPath } from '@redhat-developer/locators';
 import { CodeUtil, CustomPageObjectsOptions, ReleaseQuality } from './util/codeUtil';
@@ -219,7 +219,10 @@ export class VSBrowser {
 			console.error(`Emergency browser shutdown triggered by ${reason}`);
 			try {
 				if (VSBrowser._instance?._driver) {
-					await VSBrowser._instance._driver.quit();
+					// Bound the quit call — if ChromeDriver is unresponsive (likely when the
+					// process is being killed), waiting on it forever would defeat the purpose
+					// of this handler and stall the CI runner's shutdown.
+					await Promise.race([VSBrowser._instance._driver.quit(), new Promise((res) => setTimeout(res, 5_000))]);
 				}
 			} catch {
 				// best-effort; process is already dying
@@ -227,12 +230,11 @@ export class VSBrowser {
 			process.exit(exitCode);
 		};
 
+		// NOTE: deliberately no 'uncaughtException' handler here — Mocha installs its own
+		// to fail the current test and continue the run; exiting the process from a second
+		// handler would abort the whole suite on any stray async error.
 		process.on('SIGINT', () => void emergencyShutdown('SIGINT', 130));
 		process.on('SIGTERM', () => void emergencyShutdown('SIGTERM', 143));
-		process.on('uncaughtException', (err) => {
-			console.error('Uncaught exception:', err);
-			void emergencyShutdown('uncaughtException', 1);
-		});
 	}
 
 	/**
@@ -292,36 +294,35 @@ export class VSBrowser {
 	 * });
 	 */
 	async waitForWorkbench(timeout: number = 30_000, waitForFn?: () => void | Promise<any>): Promise<void> {
-		const maxRetries = 3;
-		const retryDelay = 2_000;
-		const deadline = Date.now() + timeout;
-
-		for (let attempt = 0; attempt <= maxRetries; attempt++) {
-			const remaining = deadline - Date.now();
-			if (remaining <= 0) {
-				throw new Error(`Workbench was not loaded properly after ${timeout} ms.`);
-			}
-
-			try {
-				await this._driver.wait(
-					until.elementLocated(By.className('monaco-workbench')),
-					Math.min(remaining, timeout),
-					`Workbench was not loaded properly after ${timeout} ms.`,
-				);
-				// Also verify the workbench is visible, not just located
-				const workbench = await this._driver.findElement(By.className('monaco-workbench'));
-				await this._driver.wait(until.elementIsVisible(workbench), Math.min(deadline - Date.now(), 5_000));
-				break;
-			} catch (err) {
-				const isWebDriverError = (err as Error).name === 'WebDriverError';
-				if (isWebDriverError && attempt < maxRetries) {
-					console.warn(`Workbench wait attempt ${attempt + 1} failed with WebDriverError, retrying in ${retryDelay}ms...`);
-					await new Promise((res) => setTimeout(res, retryDelay));
-				} else {
+		// Errors that indicate the workbench is not (or no longer) present rather than a
+		// broken session: the window may be mid-reload (e.g. a folder was just opened,
+		// which reloads the whole workbench), so keep polling instead of failing.
+		const transientErrors = ['NoSuchElementError', 'StaleElementReferenceError', 'WebDriverError', 'NoSuchWindowError'];
+		await this._driver.wait(
+			async () => {
+				try {
+					const workbench = await this._driver.findElements(By.className('monaco-workbench'));
+					return workbench.length > 0 && (await workbench[0].isDisplayed());
+				} catch (err) {
+					const name = (err as Error).name;
+					if (name === 'NoSuchWindowError') {
+						// The window handle died (e.g. replaced during a reload) — re-attach
+						// to the first available window and keep polling.
+						const handles = await this._driver.getAllWindowHandles().catch(() => [] as string[]);
+						if (handles.length > 0) {
+							await this._driver.switchTo().window(handles[0]);
+						}
+						return false;
+					}
+					if (transientErrors.includes(name)) {
+						return false;
+					}
 					throw err;
 				}
-			}
-		}
+			},
+			timeout,
+			`Workbench was not loaded properly after ${timeout} ms.`,
+		);
 
 		if (waitForFn) {
 			await waitForFn();
@@ -402,5 +403,43 @@ export class VSBrowser {
 		const code = new CodeUtil(this.storagePath, this.releaseType, this.extensionsFolder);
 		code.open(...paths);
 		await this.waitForWorkbench(undefined, waitForFn);
+
+		// The CLI open request can occasionally get lost by the running VS Code instance
+		// (observed on macOS after a workspace switch reloaded the window). Verify that
+		// each file resource actually shows up as an editor tab and retry the open once
+		// before giving up, so callers fail fast with a clear error instead of timing
+		// out later on a missing editor.
+		const files = paths.filter((p) => fs.existsSync(p) && fs.statSync(p).isFile());
+		if (files.length > 0 && !(await this.filesOpenedInEditor(files, 15_000))) {
+			console.warn(`Opened resources did not appear in the editor, retrying: ${files.join(', ')}`);
+			code.open(...paths);
+			await this.waitForWorkbench(undefined);
+			if (!(await this.filesOpenedInEditor(files, 15_000))) {
+				throw new Error(`Failed to open resource(s) in the editor: ${files.join(', ')}`);
+			}
+		}
+	}
+
+	/**
+	 * Best-effort check that every given file is open as an editor tab.
+	 * Resolves to true once all file basenames are found among the open editor titles
+	 * in any editor group, false if that does not happen within the given timeout.
+	 */
+	private async filesOpenedInEditor(files: string[], timeout: number): Promise<boolean> {
+		const names = files.map((f) => path.basename(f));
+		try {
+			await this._driver.wait(async () => {
+				try {
+					const titles = await new EditorView().getOpenEditorTitles();
+					return names.every((name) => titles.some((title) => title === name || title.startsWith(name)));
+				} catch {
+					// Editor area may not exist yet (empty window) or may be mid-reload
+					return false;
+				}
+			}, timeout);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 }
