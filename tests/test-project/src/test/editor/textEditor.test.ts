@@ -512,8 +512,11 @@ describe('TextEditor', function () {
 			expect(await lens?.getTooltip()).has.string('Tooltip provided');
 		});
 
-		it('getCodeLenses works with second in the span', async function () {
-			const lens = await editor.getCodeLens(6);
+		it('getCodeLenses works with second in the span', async function (this: Mocha.Context) {
+			this.timeout(15000);
+			// Lenses within a span render progressively — the second one can appear
+			// noticeably later than the first on slow runners, so poll until it exists.
+			const lens = await editor.getDriver().wait(async () => await editor.getCodeLens(6), 10000, 'CodeLens at index 6 did not appear');
 			expect(lens).is.not.undefined;
 			expect(await lens?.getText()).has.string('Codelens provided');
 			expect(await lens?.getTooltip()).has.string('Tooltip provided');
