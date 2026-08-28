@@ -111,7 +111,9 @@ describe('Debugging', function () {
 
 		after(async function () {
 			this.timeout(15000);
-			if (await debugBar.isDisplayed()) {
+			// debugBar stays undefined when 'start the debug session' failed —
+			// cleanup must not mask the original failure with a TypeError.
+			if (debugBar && (await debugBar.isDisplayed().catch(() => false))) {
 				await debugBar.stop();
 			}
 		});
@@ -127,6 +129,10 @@ describe('Debugging', function () {
 		});
 
 		it('start the debug session', async function () {
+			// The debug adapter can take a while to spin up on slow CI runners —
+			// give the internal waits (toolbar creation + breakpoint pause, up to
+			// ~30s combined) more room than the global 10s mocha timeout.
+			this.timeout(40000);
 			await view.start();
 			debugBar = await DebugToolbar.create(10000);
 			await debugBar.waitForBreakPoint();
@@ -416,7 +422,7 @@ describe('Debugging', function () {
 
 		it('stop the debug session', async function () {
 			await debugBar.stop();
-			await editor.getDriver().wait(until.elementIsNotVisible(debugBar));
+			await editor.getDriver().wait(until.elementIsNotVisible(debugBar), 5000, 'Debug toolbar did not disappear after stopping the session');
 		});
 
 		it('remove the second breakpoint', async function () {
