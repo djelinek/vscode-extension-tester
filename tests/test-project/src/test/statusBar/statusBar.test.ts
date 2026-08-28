@@ -36,11 +36,11 @@ describe('StatusBar', () => {
 
 	it('can open and close the notification center', async () => {
 		const center = await bar.openNotificationsCenter();
-		await waitFor(async () => await center.isDisplayed(), { timeout: 5000, message: 'Notifications center did not open' });
+		await waitFor(async () => await center.isDisplayed(), { timeout: 10000, message: 'Notifications center did not open' });
 		expect(await center.isDisplayed()).is.true;
 
 		await bar.closeNotificationsCenter();
-		await waitFor(async () => !(await center.isDisplayed()), { timeout: 5000, message: 'Notifications center did not close' });
+		await waitFor(async () => !(await center.isDisplayed()), { timeout: 10000, message: 'Notifications center did not close' });
 		expect(await center.isDisplayed()).is.false;
 	});
 

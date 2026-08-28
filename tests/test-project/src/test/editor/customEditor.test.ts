@@ -26,7 +26,7 @@ describe('CustomEditor', () => {
 	const CUSTOM_TITLE: string = 'example.cscratch';
 
 	before(async function () {
-		this.timeout(70000);
+		this.timeout(100000);
 		// Ensure the driver is at the top-level window context before doing anything,
 		// in case a previous test suite left it inside a webview frame.
 		await VSBrowser.instance.driver.switchTo().defaultContent();
@@ -45,8 +45,10 @@ describe('CustomEditor', () => {
 		// switchToFrame() polls for both the outer and inner active-frame iframes
 		// under a single shared deadline, so a single call with a generous timeout
 		// is both correct and sufficient — no retry loop needed in the test.
+		// Generous timeout: the slowest CI runners have shown webview creation
+		// taking well over 30s while the rest of the suite runs 4-5x slower too.
 		const webview = editor.getWebView();
-		await webview.switchToFrame(30000);
+		await webview.switchToFrame(60000);
 		await webview.switchBack();
 	});
 

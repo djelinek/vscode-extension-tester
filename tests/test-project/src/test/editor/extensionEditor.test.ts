@@ -79,22 +79,25 @@ describe('Extension Editor', function () {
 
 		await driver.wait(
 			async () => {
+				// Every step in this poll can hit a stale element while the extensions
+				// list or editor area re-renders — treat any failure as "not yet" and
+				// retry on the next tick rather than failing the whole hook.
 				try {
-					await item.click();
-				} catch {
-					// The extensions list re-renders asynchronously (marketplace queries,
-					// filter refreshes) and stales the item reference — re-locate it
-					// before the next attempt instead of clicking a dead element.
 					try {
+						await item.click();
+					} catch {
+						// The extensions list re-renders asynchronously (marketplace queries,
+						// filter refreshes) and stales the item reference — re-locate it
+						// before the next attempt instead of clicking a dead element.
 						const currentView = await viewControl.openView();
 						const currentSection = (await currentView.getContent().getSection('Installed')) as ExtensionsViewSection;
 						item = (await currentSection.findItem(`@installed ${pjson.displayName}`)) as ExtensionsViewItem;
-					} catch {
-						// list may still be refreshing — retry on next poll
 					}
+					const titles = await new EditorView().getOpenEditorTitles();
+					return titles.some((title) => title.includes('Extension:'));
+				} catch {
+					return false;
 				}
-				const titles = await new EditorView().getOpenEditorTitles();
-				return titles.some((title) => title.includes('Extension:'));
 			},
 			30000,
 			'Extension editor did not open after click',
