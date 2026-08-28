@@ -16,15 +16,18 @@
  */
 
 import * as fs from 'fs-extra';
-import { promisify } from 'util';
-import stream from 'stream';
+import { promisify } from 'node:util';
+import stream from 'node:stream';
 import { HttpProxyAgent, HttpsProxyAgent } from 'hpagent';
 
 const retryCount = 5;
+const noProxy = process.env.NO_PROXY || process.env.no_proxy;
+
 const httpProxyAgent = !process.env.HTTP_PROXY
 	? undefined
 	: new HttpProxyAgent({
 			proxy: process.env.HTTP_PROXY,
+			...(noProxy ? { noProxy } : {}),
 		});
 
 const rejectUnauthorized = +(process.env.HTTPS_TLS_REJECT_UNAUTHORIZED ?? 1) >= 1;
@@ -32,6 +35,7 @@ const httpsProxyAgent = !process.env.HTTPS_PROXY
 	? undefined
 	: new HttpsProxyAgent({
 			proxy: process.env.HTTPS_PROXY,
+			...(noProxy ? { noProxy } : {}),
 		});
 
 const options = {
@@ -44,6 +48,10 @@ const options = {
 	agent: {
 		http: httpProxyAgent,
 		https: httpsProxyAgent,
+	},
+	timeout: {
+		request: 180_000,
+		response: 120_000,
 	},
 	retry: {
 		limit: retryCount,
@@ -71,24 +79,41 @@ const options = {
 export class Download {
 	/**
 	 * Check whether a URL is reachable (HTTP 2xx) without downloading the body.
-	 * Throws if the URL returns a non-2xx status or a network error.
+	 * Retries up to 3 times to handle transient CDN/DNS failures that would
+	 * otherwise cause ChromeDriver version resolution to fall back silently.
 	 */
 	static async checkURL(uri: string): Promise<void> {
 		const got = (await import('got')).default;
-		await got.head(uri, { ...options, retry: { limit: 0 } });
+		await got.head(uri, { ...options, retry: { ...options.retry, limit: 3 } });
 	}
 
-	static async getText(uri: string): Promise<string> {
+	/**
+	 * Fetch text content from a URL and parse it as JSON.
+	 */
+	static async getJSON<T = unknown>(uri: string): Promise<T> {
 		const got = (await import('got')).default;
 		const body = await got(uri, options).text();
-		return JSON.parse(body as string);
+		return JSON.parse(body) as T;
 	}
 
+	/**
+	 * Fetch raw text content from a URL.
+	 */
+	static async getText(uri: string): Promise<string> {
+		const got = (await import('got')).default;
+		return await got(uri, options).text();
+	}
+
+	/**
+	 * Download a file to disk atomically: writes to a `.tmp` file first, then
+	 * renames on success. This prevents partial/truncated downloads from being
+	 * treated as valid cached archives.
+	 */
 	static async getFile(uri: string, destination: string, progress = false): Promise<void> {
+		const tmpDest = `${destination}.tmp`;
 		let lastTick = 0;
 		const got = (await import('got')).default;
 		const dlStream = got.stream(uri, options);
-		// needed in order to enable retry feature:
 		dlStream.on('retry', (newRetryCount: number, error) => {
 			console.warn(`retry(${newRetryCount}): Failed getting ${uri} due to ${error}`);
 		});
@@ -101,8 +126,14 @@ export class Download {
 				}
 			});
 		}
-		const writeStream = fs.createWriteStream(destination);
+		const writeStream = fs.createWriteStream(tmpDest);
 
-		return await promisify(stream.pipeline)(dlStream, writeStream);
+		try {
+			await promisify(stream.pipeline)(dlStream, writeStream);
+			await fs.rename(tmpDest, destination);
+		} catch (err) {
+			await fs.remove(tmpDest).catch(() => {});
+			throw err;
+		}
 	}
 }

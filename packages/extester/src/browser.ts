@@ -40,6 +40,7 @@ export class VSBrowser {
 	private readonly locale: string;
 	private static _instance: VSBrowser;
 	private readonly _startTimestamp: string;
+	private static _signalHandlersRegistered = false;
 
 	private formatTimestamp(date: Date): string {
 		const pad = (num: number) => num.toString().padStart(2, '0');
@@ -189,10 +190,49 @@ export class VSBrowser {
 			.forBrowser(Browser.CHROME)
 			.setChromeOptions(options)
 			.build();
+
+		await this._driver.manage().setTimeouts({
+			implicit: 0,
+			pageLoad: 60_000,
+			script: 30_000,
+		});
+
 		VSBrowser._instance = this;
 
 		initPageObjects(this.codeVersion, VSBrowser.baseVersion, getLocatorsPath(), this._driver, VSBrowser.browserName, this.customPageObjects?.locatorsPath);
+		VSBrowser.registerSignalHandlers();
 		return this;
+	}
+
+	/**
+	 * Register process signal handlers to ensure the WebDriver session is
+	 * terminated when the process exits unexpectedly (Ctrl+C, kill, crash).
+	 * Prevents orphaned ChromeDriver and VS Code processes on CI.
+	 */
+	private static registerSignalHandlers(): void {
+		if (VSBrowser._signalHandlersRegistered) {
+			return;
+		}
+		VSBrowser._signalHandlersRegistered = true;
+
+		const emergencyShutdown = async (reason: string, exitCode: number) => {
+			console.error(`Emergency browser shutdown triggered by ${reason}`);
+			try {
+				if (VSBrowser._instance?._driver) {
+					await VSBrowser._instance._driver.quit();
+				}
+			} catch {
+				// best-effort; process is already dying
+			}
+			process.exit(exitCode);
+		};
+
+		process.on('SIGINT', () => emergencyShutdown('SIGINT', 130));
+		process.on('SIGTERM', () => emergencyShutdown('SIGTERM', 143));
+		process.on('uncaughtException', (err) => {
+			console.error('Uncaught exception:', err);
+			emergencyShutdown('uncaughtException', 1);
+		});
 	}
 
 	/**
@@ -252,16 +292,37 @@ export class VSBrowser {
 	 * });
 	 */
 	async waitForWorkbench(timeout: number = 30_000, waitForFn?: () => void | Promise<any>): Promise<void> {
-		// Workaround/patch for https://github.com/redhat-developer/vscode-extension-tester/issues/466
-		try {
-			await this._driver.wait(until.elementLocated(By.className('monaco-workbench')), timeout, `Workbench was not loaded properly after ${timeout} ms.`);
-		} catch (err) {
-			if ((err as Error).name === 'WebDriverError') {
-				await new Promise((res) => setTimeout(res, 3000));
-			} else {
-				throw err;
+		const maxRetries = 3;
+		const retryDelay = 2_000;
+		const deadline = Date.now() + timeout;
+
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				throw new Error(`Workbench was not loaded properly after ${timeout} ms.`);
+			}
+
+			try {
+				await this._driver.wait(
+					until.elementLocated(By.className('monaco-workbench')),
+					Math.min(remaining, timeout),
+					`Workbench was not loaded properly after ${timeout} ms.`,
+				);
+				// Also verify the workbench is visible, not just located
+				const workbench = await this._driver.findElement(By.className('monaco-workbench'));
+				await this._driver.wait(until.elementIsVisible(workbench), Math.min(deadline - Date.now(), 5_000));
+				break;
+			} catch (err) {
+				const isWebDriverError = (err as Error).name === 'WebDriverError';
+				if (isWebDriverError && attempt < maxRetries) {
+					console.warn(`Workbench wait attempt ${attempt + 1} failed with WebDriverError, retrying in ${retryDelay}ms...`);
+					await new Promise((res) => setTimeout(res, retryDelay));
+				} else {
+					throw err;
+				}
 			}
 		}
+
 		if (waitForFn) {
 			await waitForFn();
 		}
@@ -271,16 +332,24 @@ export class VSBrowser {
 	 * Terminates the webdriver/browser
 	 */
 	async quit(): Promise<void> {
-		const entries = await this._driver.manage().logs().get(logging.Type.DRIVER);
-		const logFile = path.join(this.storagePath, 'test.log');
-		const stream = fs.createWriteStream(logFile, { flags: 'w' });
-		for (const entry of entries) {
-			stream.write(`[${new Date(entry.timestamp).toLocaleTimeString()}][${entry.level.name}] ${entry.message}`);
+		try {
+			const entries = await this._driver.manage().logs().get(logging.Type.DRIVER);
+			const logFile = path.join(this.storagePath, 'test.log');
+			const logStream = fs.createWriteStream(logFile, { flags: 'w' });
+			for (const entry of entries) {
+				logStream.write(`[${new Date(entry.timestamp).toLocaleTimeString()}][${entry.level.name}] ${entry.message}`);
+			}
+			logStream.end();
+		} catch (err) {
+			console.error('Failed to collect driver logs before shutdown:', err);
+		} finally {
+			console.log('Shutting down the browser');
+			try {
+				await this._driver.quit();
+			} catch (quitErr) {
+				console.error('Error while quitting the driver:', quitErr);
+			}
 		}
-		stream.end();
-
-		console.log('Shutting down the browser');
-		await this._driver.quit();
 	}
 
 	/**

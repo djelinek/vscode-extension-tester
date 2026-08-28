@@ -90,6 +90,7 @@ export class CodeUtil {
 	private readonly extensionsFolder: string | undefined;
 	private readonly coverage: boolean | undefined;
 	private readonly env: NodeJS.ProcessEnv = { ...process.env };
+	private cachedCodeVersion: string | undefined;
 
 	/**
 	 * Create an instance of code handler
@@ -128,8 +129,7 @@ export class CodeUtil {
 	 */
 	async getVSCodeVersions(): Promise<string[]> {
 		const apiUrl = `https://update.code.visualstudio.com/api/releases/${this.releaseType}`;
-		const json = await Download.getText(apiUrl);
-		return json as unknown as string[];
+		return await Download.getJSON<string[]>(apiUrl);
 	}
 
 	/**
@@ -150,6 +150,7 @@ export class CodeUtil {
 
 		console.log(`Downloading VS Code: ${literalVersion} / ${this.releaseType}`);
 		if (!fs.existsSync(this.getExecutablePath()) || this.getExistingCodeVersion() !== literalVersion || noCache) {
+			this.cachedCodeVersion = undefined;
 			fs.mkdirpSync(this.downloadFolder);
 
 			const url = ['https://update.code.visualstudio.com', version, this.downloadPlatform, this.releaseType].join('/');
@@ -192,7 +193,23 @@ export class CodeUtil {
 					// Remove macOS quarantine attribute that may be inherited from the downloaded
 					// zip on newer macOS versions (Sequoia / Tahoe), which would prevent
 					// the hardened-runtime app bundle from launching via ChromeDriver.
-					childProcess.execSync(`xattr -r -d com.apple.quarantine "${this.codeFolder}"`, { stdio: 'ignore' });
+					try {
+						childProcess.execSync(`xattr -r -d com.apple.quarantine "${this.codeFolder}"`, { stdio: 'ignore', timeout: 30_000 });
+					} catch {
+						// xattr -d exits non-zero when the attribute is absent. Verify that
+						// quarantine is actually gone; only fail if it persists.
+						try {
+							const attrs = childProcess.execSync(`xattr "${this.codeFolder}"`, { timeout: 10_000 }).toString();
+							if (attrs.includes('com.apple.quarantine')) {
+								throw new Error(`Failed to remove quarantine attribute from ${this.codeFolder}`);
+							}
+						} catch (verifyErr) {
+							if (verifyErr instanceof Error && verifyErr.message.includes('Failed to remove quarantine')) {
+								throw verifyErr;
+							}
+							// xattr listing itself failed — attribute is likely absent
+						}
+					}
 				}
 				console.log('Success!');
 				if (noCache) {
@@ -256,10 +273,10 @@ export class CodeUtil {
 			command += ' --pre-release';
 		}
 		if (this.extensionsFolder) {
-			command += ` --extensions-dir=${this.extensionsFolder}`;
+			command += ` --extensions-dir="${this.extensionsFolder}"`;
 		}
 		command += ` --user-data-dir="${path.join(this.downloadFolder, 'settings')}"`;
-		childProcess.execSync(command, { stdio: 'inherit' });
+		childProcess.execSync(command, { stdio: 'inherit', timeout: 120_000 });
 	}
 
 	/**
@@ -310,9 +327,9 @@ export class CodeUtil {
 		if (cleanup) {
 			let command = `${this.getCliInitCommand()} --uninstall-extension "${extension}"`;
 			if (this.extensionsFolder) {
-				command += ` --extensions-dir=${this.extensionsFolder}`;
+				command += ` --extensions-dir="${this.extensionsFolder}"`;
 			}
-			childProcess.execSync(command, { stdio: 'inherit' });
+			childProcess.execSync(command, { stdio: 'inherit', timeout: 60_000 });
 		}
 	}
 
@@ -333,16 +350,22 @@ export class CodeUtil {
 		const literalVersion =
 			runOptions.vscodeVersion === undefined || runOptions.vscodeVersion === 'latest' ? this.availableVersions[0] : runOptions.vscodeVersion;
 
-		// add chromedriver to process' path
-		const finalEnv: NodeJS.ProcessEnv = {};
-		Object.assign(finalEnv, process.env);
-		const key = 'PATH';
-		finalEnv[key] = [this.downloadFolder, process.env[key]].join(path.delimiter);
+		// Save the original environment so we can restore it after the test run
+		const savedEnv = { ...process.env };
 
-		process.env = finalEnv;
+		const key = 'PATH';
+		process.env[key] = [this.downloadFolder, process.env[key]].join(path.delimiter);
 		process.env.TEST_RESOURCES = this.downloadFolder;
-		process.env.EXTENSIONS_FOLDER = this.extensionsFolder;
-		process.env.EXTENSION_DEV_PATH = this.coverage ? process.cwd() : undefined;
+		if (this.extensionsFolder) {
+			process.env.EXTENSIONS_FOLDER = this.extensionsFolder;
+		} else {
+			delete process.env.EXTENSIONS_FOLDER;
+		}
+		if (this.coverage) {
+			process.env.EXTENSION_DEV_PATH = process.cwd();
+		} else {
+			delete process.env.EXTENSION_DEV_PATH;
+		}
 		const runner = new VSRunner(
 			this.getExecutablePath(),
 			literalVersion,
@@ -353,7 +376,17 @@ export class CodeUtil {
 			runOptions.cleanup,
 			runOptions.locale,
 		);
-		return await runner.runTests(testFilesPattern, this, runOptions.resources, runOptions.logLevel);
+		try {
+			return await runner.runTests(testFilesPattern, this, runOptions.resources, runOptions.logLevel);
+		} finally {
+			// Restore the original process environment
+			for (const envKey of Object.keys(process.env)) {
+				if (!(envKey in savedEnv)) {
+					delete process.env[envKey];
+				}
+			}
+			Object.assign(process.env, savedEnv);
+		}
 	}
 
 	/**
@@ -383,7 +416,8 @@ export class CodeUtil {
 		await Download.getFile(url, path.join(this.downloadFolder, fileName));
 
 		try {
-			const manifest = require(path.join(this.downloadFolder, fileName));
+			const manifestPath = path.join(this.downloadFolder, fileName);
+			const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
 			return manifest.registrations[0].version;
 		} catch (err) {
 			let version = '';
@@ -454,14 +488,18 @@ export class CodeUtil {
 	 * Check what VS Code version is present in the testing folder
 	 */
 	private getExistingCodeVersion(): string {
+		if (this.cachedCodeVersion) {
+			return this.cachedCodeVersion;
+		}
 		const command = `${this.cliEnv} "${this.getExecutablePath()}" "${this.getCliPath()}"`;
 		let out: Buffer;
 		try {
-			out = childProcess.execSync(`${command} -v`, { env: this.env });
+			out = childProcess.execSync(`${command} -v`, { env: this.env, timeout: 30_000 });
 		} catch (error) {
-			out = childProcess.execSync(`${command} --ms-enable-electron-run-as-node -v`, { env: this.env });
+			out = childProcess.execSync(`${command} --ms-enable-electron-run-as-node -v`, { env: this.env, timeout: 30_000 });
 		}
-		return out.toString().split('\n')[0];
+		this.cachedCodeVersion = out.toString().split('\n')[0];
+		return this.cachedCodeVersion;
 	}
 
 	/**

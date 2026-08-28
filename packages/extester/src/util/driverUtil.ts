@@ -62,7 +62,7 @@ export class DriverUtil {
 			}
 			if (localVersion.startsWith(version)) {
 				console.log(`ChromeDriver ${version} exists in local cache, skipping download`);
-				return '';
+				return driverBinary;
 			}
 		}
 
@@ -75,8 +75,13 @@ export class DriverUtil {
 			await Download.getFile(url, fileName, true);
 		}
 
-		console.log(`Unpacking ChromeDriver ${version} into ${this.downloadFolder}`);
-		await Unpack.unpack(fileName, this.downloadFolder);
+		// Only unpack if the binary doesn't exist yet or its version doesn't match
+		if (!fs.existsSync(driverBinary) || !(await this.isLocalVersionMatch(version))) {
+			console.log(`Unpacking ChromeDriver ${version} into ${this.downloadFolder}`);
+			await Unpack.unpack(fileName, this.downloadFolder);
+		} else {
+			console.log(`ChromeDriver ${version} binary already present, skipping unpack`);
+		}
 
 		if (process.platform !== 'win32') {
 			fs.chmodSync(driverBinary, 0o755);
@@ -152,10 +157,19 @@ export class DriverUtil {
 	/**
 	 * Check local chrome driver version
 	 */
+	private async isLocalVersionMatch(version: string): Promise<boolean> {
+		try {
+			const local = await this.getLocalDriverVersion(version);
+			return local.startsWith(version);
+		} catch {
+			return false;
+		}
+	}
+
 	private async getLocalDriverVersion(version: string): Promise<string> {
-		const command = `${this.getChromeDriverBinaryPath(version)} -v`;
+		const command = `"${this.getChromeDriverBinaryPath(version)}" -v`;
 		return new Promise<string>((resolve, reject) => {
-			childProcess.exec(command, (err, stdout) => {
+			childProcess.exec(command, { timeout: 15_000 }, (err, stdout) => {
 				if (err) {
 					return reject(new Error(err.message));
 				}
