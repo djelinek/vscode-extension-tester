@@ -27,6 +27,7 @@ import {
 	FindWidget,
 	VSBrowser,
 	ModalDialog,
+	WebView,
 	after,
 	before,
 	afterEach,
@@ -536,8 +537,12 @@ describe('TextEditor', function () {
 			expect(await lens0?.getId()).equal(await lens0Duplicate?.getId());
 		});
 
-		it('getCodeLens works with partial text', async function () {
-			const lens = await editor.getCodeLens('Codelens provided');
+		it('getCodeLens works with partial text', async function (this: Mocha.Context) {
+			this.timeout(15000);
+			// Lenses can be re-rendered right after they appear, so poll until one is found by its text.
+			const lens = await editor
+				.getDriver()
+				.wait(async () => await editor.getCodeLens('Codelens provided'), 10000, 'CodeLens "Codelens provided" did not appear');
 			expect(await lens?.getText()).has.string('Codelens provided');
 			expect(await lens?.getTooltip()).has.string('Tooltip provided');
 		});
@@ -714,6 +719,11 @@ describe('TextEditor in a non-focused editor group', function () {
 				timeout: 15_000,
 				message: 'WebView tab did not appear',
 			});
+			// Wait until the webview content has loaded: a loading webview grabs focus,
+			// which used to swallow the key press of the next command.
+			const webview = new WebView();
+			await webview.switchToFrame(15_000);
+			await webview.switchBack();
 
 			// group 1: a text editor, created in the webview's group and moved to the right
 			await newTextFile(0);

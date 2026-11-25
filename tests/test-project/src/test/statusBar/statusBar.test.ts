@@ -27,6 +27,11 @@ describe('StatusBar', () => {
 		this.timeout(30000);
 		await new Workbench().executeCommand('Create: New File...');
 		await (await InputBox.create()).selectQuickPick('Text File');
+		// the new editor takes focus once it opens, so let that settle before the tests click the status bar
+		await waitFor(async () => (await new EditorView().getOpenEditorTitles()).some((title) => title.startsWith('Untitled')), {
+			timeout: 10_000,
+			message: 'Untitled editor did not open',
+		});
 		bar = new StatusBar();
 	});
 
@@ -34,10 +39,19 @@ describe('StatusBar', () => {
 		await new EditorView().closeAllEditors();
 	});
 
-	it('can open and close the notification center', async () => {
+	it('can open and close the notification center', async function () {
+		this.timeout(30_000);
+		// VS Code hides the center on its own when its last notification goes away (e.g. a startup
+		// notification that times out), which can happen right after the center opened.
+		// Start from an empty center and open it again if it closed by itself.
+		await (await bar.openNotificationsCenter()).clearAllNotifications();
+		await bar.closeNotificationsCenter();
+		await waitFor(async () => await (await bar.openNotificationsCenter()).isDisplayed(), {
+			timeout: 15_000,
+			pollInterval: 500,
+			message: 'Notifications center did not open',
+		});
 		const center = await bar.openNotificationsCenter();
-		await waitFor(async () => await center.isDisplayed(), { timeout: 10000, message: 'Notifications center did not open' });
-		expect(await center.isDisplayed()).is.true;
 
 		await bar.closeNotificationsCenter();
 		await waitFor(async () => !(await center.isDisplayed()), { timeout: 10000, message: 'Notifications center did not close' });

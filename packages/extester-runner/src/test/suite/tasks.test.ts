@@ -23,6 +23,7 @@ import { RunFileTask } from '../../tasks/RunFileTask';
 import { RunAllTestsTask } from '../../tasks/RunAllTask';
 import { Logger } from '../../logger/logger';
 import { RunFolderTask } from '../../tasks/RunFolderTask';
+import { RunTestTask } from '../../tasks/RunTestTask';
 
 /**
  * Dummy implementation of vscode.OutputChannel for testing purposes.
@@ -417,5 +418,124 @@ describe('Task Command Generation', () => {
 				}),
 			'Args should include --storage with temp folder path',
 		);
+	});
+
+	/**
+	 * Tests the command generation with `runSources` enabled:
+	 * - Verifies that the TypeScript sources are passed as they are
+	 * - Ensures `rootFolder` and `outputFolder` are ignored
+	 */
+	describe('with runSources enabled', () => {
+		let workspacePath: string;
+		const sourceFolder = path.join('packages', 'ui-tests', 'src');
+
+		/** Values of all task arguments, quoted paths included. */
+		const argValues = (task: vscode.Task) =>
+			((task.execution as vscode.ShellExecution).args ?? []).map((arg) => (typeof arg === 'string' ? arg : arg.value));
+
+		before(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('runSources', true, vscode.ConfigurationTarget.Workspace);
+			await config.update('rootFolder', sourceFolder, vscode.ConfigurationTarget.Workspace);
+			await config.update('outputFolder', path.join('packages', 'ui-tests', 'out'), vscode.ConfigurationTarget.Workspace);
+			await config.update('testFileGlob', 'packages/ui-tests/src/**/*.source.test.ts', vscode.ConfigurationTarget.Workspace);
+			workspacePath = vscode.workspace.workspaceFolders![0].uri.fsPath;
+		});
+
+		after(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('runSources', undefined, vscode.ConfigurationTarget.Workspace);
+		});
+
+		it('RunFileTask passes the source file', () => {
+			const testFile = path.join(workspacePath, sourceFolder, 'editor', 'Flow.source.test.ts');
+
+			const args = argValues(new RunFileTask(testFile, dummyLogger));
+
+			assert.deepStrictEqual(args.slice(0, 3), ['extest', 'setup-and-run', `'${testFile}'`]);
+		});
+
+		it('RunFolderTask passes a glob of the source files in the folder', () => {
+			const folder = path.join(workspacePath, sourceFolder, 'editor');
+
+			const args = argValues(new RunFolderTask(folder, dummyLogger));
+
+			assert.strictEqual(args[2], `'${path.join(folder, '*.source.test.ts')}'`);
+		});
+
+		it('RunAllTestsTask passes a glob of all source files', () => {
+			const files = [
+				path.join(workspacePath, sourceFolder, 'editor', 'A.source.test.ts'),
+				path.join(workspacePath, sourceFolder, 'views', 'B.source.test.ts'),
+			];
+
+			const args = argValues(new RunAllTestsTask(files, dummyLogger));
+
+			assert.strictEqual(args[2], `'${path.join(workspacePath, sourceFolder, '**', '*.source.test.ts')}'`);
+		});
+	});
+
+	describe('environment of a run', () => {
+		let workspacePath: string;
+		const env = (task: vscode.Task) => (task.execution as vscode.ShellExecution).options?.env;
+
+		before(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('env', { TEST_USER: 'tester' }, vscode.ConfigurationTarget.Workspace);
+			workspacePath = vscode.workspace.workspaceFolders![0].uri.fsPath;
+		});
+
+		after(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('env', undefined, vscode.ConfigurationTarget.Workspace);
+		});
+
+		it('RunFileTask passes the configured environment variables', () => {
+			const task = new RunFileTask(path.join(workspacePath, 'src', 'ui-test', 'a.test.ts'), dummyLogger);
+
+			assert.deepStrictEqual(env(task), { TEST_USER: 'tester' });
+		});
+
+		it('RunTestTask runs the file and selects the test with MOCHA_GREP', () => {
+			const testFile = path.join(workspacePath, 'src', 'ui-test', 'a.test.ts');
+
+			const task = new RunTestTask(testFile, ['Editor (1.2)', 'opens a file'], true, dummyLogger);
+
+			assert.strictEqual(task.runLabel, 'Run Test: opens a file');
+			assert.deepStrictEqual(env(task), { TEST_USER: 'tester', MOCHA_GREP: String.raw`^Editor \(1\.2\) opens a file$` });
+		});
+
+		it('RunTestTask selects all tests of a describe block', () => {
+			const testFile = path.join(workspacePath, 'src', 'ui-test', 'a.test.ts');
+
+			const task = new RunTestTask(testFile, ['Editor'], false, dummyLogger);
+
+			assert.strictEqual(task.runLabel, 'Run Suite: Editor');
+			assert.strictEqual(env(task)?.MOCHA_GREP, '^Editor ');
+		});
+	});
+
+	describe('with a custom run command', () => {
+		let workspacePath: string;
+
+		before(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('runCommand', 'npm run ui-test -- ${target}', vscode.ConfigurationTarget.Workspace);
+			workspacePath = vscode.workspace.workspaceFolders![0].uri.fsPath;
+		});
+
+		after(async () => {
+			const config = vscode.workspace.getConfiguration('extesterRunner');
+			await config.update('runCommand', undefined, vscode.ConfigurationTarget.Workspace);
+		});
+
+		it('runs the command with the target instead of extest setup-and-run', () => {
+			const task = new RunFileTask(path.join(workspacePath, 'src', 'ui-test', 'a.test.ts'), dummyLogger);
+			const execution = task.execution as vscode.ShellExecution;
+
+			assert.ok(execution.commandLine?.startsWith("npm run ui-test -- '"), String(execution.commandLine));
+			assert.deepStrictEqual(execution.args ?? [], []);
+			assert.strictEqual(execution.options?.cwd, workspacePath);
+		});
 	});
 });

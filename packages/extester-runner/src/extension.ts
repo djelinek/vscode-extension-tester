@@ -16,14 +16,15 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import { createLogger, Logger } from './logger/logger';
-import { ExtesterTreeProvider } from './providers/extesterTreeProvider';
+import { TestFileDiscovery } from './testing/testFileDiscovery';
 import { registerCommands } from './commands/registerCommands';
-import { createFileWatcher } from './utils/fileWatcher';
 import { ScreenshotsTreeProvider } from './providers/screenshotsTreeProvider';
 import { LogsTreeProvider } from './providers/logsTreeProvider';
-import { createLogsWatcher } from './utils/logWatcher';
-import { createScreenshotsWatcher } from './utils/screenshotsWatcher';
+import { TestRunManager } from './tasks/runManager';
+import { TestExplorer } from './testing/testExplorer';
+import { screenshotOfMessage } from './testing/runReporter';
 
 let logger: Logger;
 
@@ -36,32 +37,31 @@ let logger: Logger;
  * @param {vscode.ExtensionContext} context - The extension context, used for managing subscriptions.
  */
 export async function activate(context: vscode.ExtensionContext) {
-	// Open walkthrough automatically if it's the first activation.
-	const hasShownWalkthrough = context.globalState.get<boolean>('extesterRunner.walkthroughShown');
-	if (!hasShownWalkthrough) {
-		await vscode.commands.executeCommand('workbench.action.openWalkthrough', 'ExTester.extester-runner#extester-runner.gettingStarted');
+	// The walkthrough id is prefixed with the extension id (publisher.name), read from the manifest.
+	const walkthroughId = `${context.extension.id}#extester-runner.gettingStarted`;
+	context.subscriptions.push(
+		vscode.commands.registerCommand('extester-runner.openWalkthrough', () =>
+			vscode.commands.executeCommand('workbench.action.openWalkthrough', walkthroughId),
+		),
+	);
 
-		// Mark walkthrough as shown to prevent repeated openings.
-		context.globalState.update('extesterRunner.walkthroughShown', true);
-	}
+	// VS Code opens the walkthrough when the extension is installed from the Extensions view
+	// (workbench.welcomePage.walkthroughs.openOnInstall), so it is not opened again on activation.
+	// Opening it on activation changed the editor layout while the views were loading.
 
 	// Create an output channel for logging.
+	// The channel is disposed with the extension's subscriptions when the extension is deactivated.
 	const outputChannel = vscode.window.createOutputChannel('ExTester Runner');
+	context.subscriptions.push(outputChannel);
 	logger = createLogger(outputChannel);
 
-	// Register the tree views:
-	// test view
-	const treeDataProvider = await ExtesterTreeProvider.create(logger);
-	logger.debug('Registering test tree view.');
-	vscode.window.createTreeView('extesterView', {
-		treeDataProvider: treeDataProvider,
-		showCollapseAll: true,
-	});
+	// Discovers the test files; the Testing view lists and runs them.
+	const testFileDiscovery = await TestFileDiscovery.create(logger);
 
 	// screenshots view
 	const screenshotsDataProvider = new ScreenshotsTreeProvider(logger);
 	logger.debug('Registering screenshot tree view.');
-	vscode.window.createTreeView('extesterResourcesScreenshotsView', {
+	const screenshotsView = vscode.window.createTreeView('extesterResourcesScreenshotsView', {
 		treeDataProvider: screenshotsDataProvider,
 		showCollapseAll: true,
 	});
@@ -69,18 +69,41 @@ export async function activate(context: vscode.ExtensionContext) {
 	// logs view
 	const logsDataProvider = new LogsTreeProvider(logger);
 	logger.debug('Registering logs tree view.');
-	vscode.window.createTreeView('extesterResourcesLogsView', {
+	const logsView = vscode.window.createTreeView('extesterResourcesLogsView', {
 		treeDataProvider: logsDataProvider,
 		showCollapseAll: true,
 	});
 
-	// Register extension commands.
-	registerCommands(context, treeDataProvider, screenshotsDataProvider, logsDataProvider, logger);
+	// Runs one test task at a time.
+	const runManager = new TestRunManager(logger);
 
-	// Create a file system watchers to monitor changes.
-	createFileWatcher(context, treeDataProvider, logger); // test view
-	createScreenshotsWatcher(context, screenshotsDataProvider, logger); // screenshots view
-	createLogsWatcher(context, logsDataProvider, logger); // logs view
+	// Tests in VS Code's Testing view, with a result, output and screenshot for each test.
+	const testExplorer = new TestExplorer(
+		testFileDiscovery,
+		runManager,
+		context.asAbsolutePath(path.join('out', 'resultHook.js')),
+		() => screenshotsDataProvider.resolveRootPath(),
+		logger,
+	);
+
+	// Dispose the views, the test discovery and the test controller with the extension.
+	context.subscriptions.push(
+		screenshotsView,
+		logsView,
+		runManager,
+		testFileDiscovery,
+		testExplorer,
+		// "Open Screenshot" in the failure peek of the Testing view.
+		vscode.commands.registerCommand('extester-runner.openTestScreenshot', (context?: { message?: vscode.TestMessage }) => {
+			const screenshot = screenshotOfMessage(context?.message);
+			if (screenshot) {
+				void vscode.commands.executeCommand('vscode.open', screenshot);
+			}
+		}),
+	);
+
+	// Register extension commands.
+	registerCommands(context, testFileDiscovery, screenshotsDataProvider, logsDataProvider, logger);
 
 	logger.info('ExTester Runner extension activated successfully.');
 }
@@ -89,8 +112,8 @@ export async function activate(context: vscode.ExtensionContext) {
  * Deactivates the ExTester Runner extension.
  *
  * This function is called when VS Code shuts down or the extension is deactivated.
- * It disposes of the output channel to free resources.
+ * The output channel, views and test controller are disposed with the extension's subscriptions.
  */
 export function deactivate() {
-	vscode.window.createOutputChannel('ExTester Runner').dispose();
+	// Nothing to clean up beyond the extension's subscriptions.
 }
