@@ -265,7 +265,8 @@
     "test:webview": "npm run cb-init && extest setup-and-run \"./out/test/webview/**/*.test.js\" --config ./extester.config.json",
     "test:workbench": "npm run cb-init && extest setup-and-run \"./out/test/workbench/**/*.test.js\" --config ./extester.config.json",
     "test:xsideBar": "npm run cb-init && extest setup-and-run \"./out/test/xsideBar/**/*.test.js\" --config ./extester.config.json",
-    "test:vitest": "npm run cb-init && extest setup-and-run --config ./extester.config.vitest.json"
+    "test:vitest": "npm run cb-init && extest setup-and-run --config ./extester.config.vitest.json",
+    "test:node-test": "npm run cb-init && extest setup-and-run --config ./extester.config.node-test.json"
   },
   "devDependencies": {
     "chai": "^4.5.0",
