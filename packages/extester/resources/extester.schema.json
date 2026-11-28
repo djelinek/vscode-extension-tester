@@ -297,9 +297,9 @@
         },
         "testRunner": {
           "type": "string",
-          "enum": ["mocha", "vitest"],
+          "enum": ["mocha", "vitest", "node"],
           "default": "mocha",
-          "description": "Experimental: test framework running the tests. Vitest needs the vitest package installed and does not support hiddenWindow yet."
+          "description": "Experimental: test framework running the tests. Vitest needs the vitest package installed and does not support hiddenWindow yet. \"node\" is the Node.js built-in test runner (node:test, Node.js 22.8+)."
         },
         "vitestConfig": {
           "type": "string",

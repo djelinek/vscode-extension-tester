@@ -69,7 +69,7 @@ export interface ExTesterRunConfig {
 	/** Path to a Mocha configuration file (e.g. `.mocharc.js`). */
 	mochaConfig?: string;
 	/** Experimental: test framework running the tests. Defaults to `mocha`. */
-	testRunner?: 'mocha' | 'vitest';
+	testRunner?: 'mocha' | 'vitest' | 'node';
 	/** Path to a Vitest configuration file (e.g. `vitest.config.ts`), used with `testRunner: "vitest"`. */
 	vitestConfig?: string;
 	/** Webdriver log level. Defaults to `Info`. */

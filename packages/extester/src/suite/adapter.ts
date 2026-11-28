@@ -18,10 +18,13 @@
 import type { VSBrowser } from '../browser';
 
 /** Test frameworks ExTester can run the UI tests with */
-export const TEST_RUNNERS = ['mocha', 'vitest'] as const;
+export const TEST_RUNNERS = ['mocha', 'vitest', 'node'] as const;
 
 /** Name of a test framework ExTester can run the UI tests with */
 export type TestRunnerName = (typeof TEST_RUNNERS)[number];
+
+/** Other names accepted for the test runners */
+const TEST_RUNNER_ALIASES: Record<string, TestRunnerName> = { 'node:test': 'node' };
 
 /** Test framework used when none is configured */
 export const DEFAULT_TEST_RUNNER: TestRunnerName = 'mocha';
@@ -36,7 +39,8 @@ export function parseTestRunner(value: string | undefined): TestRunnerName {
 	if (value === undefined || value === '') {
 		return DEFAULT_TEST_RUNNER;
 	}
-	const name = value.trim().toLowerCase();
+	const requested = value.trim().toLowerCase();
+	const name = TEST_RUNNER_ALIASES[requested] ?? requested;
 	if ((TEST_RUNNERS as readonly string[]).includes(name)) {
 		return name as TestRunnerName;
 	}
@@ -116,6 +120,11 @@ export function createTestRunnerAdapter(name: TestRunnerName, options: TestRunne
 			const { VitestAdapter } = require('./vitest/vitestAdapter') as typeof import('./vitest/vitestAdapter');
 			return new VitestAdapter(options);
 		}
+		case 'node': {
+			const { NodeTestAdapter } = require('./node/nodeTestAdapter') as typeof import('./node/nodeTestAdapter');
+			// node:test has no configuration file
+			return new NodeTestAdapter();
+		}
 		default:
 			throw new Error(`Unknown test runner "${String(name)}"`);
 	}
@@ -129,6 +138,10 @@ export function createTestRunnerAdapter(name: TestRunnerName, options: TestRunne
 export function assertTestRunnerAvailable(name: TestRunnerName): void {
 	if (name === 'vitest') {
 		resolveFromProject('vitest/node', 'vitest');
+	}
+	if (name === 'node') {
+		const { assertNodeTestSupported } = require('./node/nodeTestAdapter') as typeof import('./node/nodeTestAdapter');
+		assertNodeTestSupported();
 	}
 	// Mocha is resolved from ExTester itself, as before; a missing one is reported when the run starts
 }
@@ -205,18 +218,34 @@ export interface TestRunnerSelection {
 export function selectTestRunner(options: TestRunnerSelectionOptions, hiddenWindowRequested = false): TestRunnerSelection {
 	const name = parseTestRunner(options.testRunner);
 	if (name === 'mocha') {
-		if (options.vitestConfig) {
-			console.log('\x1b[33m%s\x1b[0m', `WARNING: the Vitest configuration ${options.vitestConfig} is ignored, the tests run with Mocha`);
-		}
+		warnIgnoredConfig(options.vitestConfig, 'Vitest', 'Mocha');
 		return { name, configFile: options.config };
+	}
+	if (name === 'node') {
+		// node:test has no configuration file; it runs the tests in this process, so the hidden window mode works as with Mocha
+		const { assertNoNameFilterEnv } = require('./node/nodeTestAdapter') as typeof import('./node/nodeTestAdapter');
+		assertNoNameFilterEnv();
+		warnIgnoredConfig(options.config, 'Mocha', 'node:test');
+		warnIgnoredConfig(options.vitestConfig, 'Vitest', 'node:test');
+		return { name };
 	}
 	if (options.hiddenWindow || hiddenWindowRequested) {
 		throw new Error(
 			'The hidden window mode is not supported with the Vitest test runner yet: Vitest runs the tests in worker processes, which cannot restart VS Code. Run without --hidden_window, or with Mocha.',
 		);
 	}
-	if (options.config) {
-		console.log('\x1b[33m%s\x1b[0m', `WARNING: the Mocha configuration ${options.config} is ignored, the tests run with Vitest`);
-	}
+	warnIgnoredConfig(options.config, 'Mocha', 'Vitest');
 	return { name, configFile: options.vitestConfig };
+}
+
+/**
+ * Warn that a configuration file of another test framework is not used
+ * @param file configuration file, nothing is printed when undefined
+ * @param framework framework the file configures
+ * @param runner test runner the tests run with
+ */
+function warnIgnoredConfig(file: string | undefined, framework: string, runner: string): void {
+	if (file) {
+		console.log('\x1b[33m%s\x1b[0m', `WARNING: the ${framework} configuration ${file} is ignored, the tests run with ${runner}`);
+	}
 }

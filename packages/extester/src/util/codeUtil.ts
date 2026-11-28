@@ -53,7 +53,7 @@ export interface RunOptions {
 	cleanup?: boolean;
 	/** path to a custom mocha configuration file */
 	config?: string;
-	/** experimental: test framework running the tests, `mocha` (default) or `vitest` */
+	/** experimental: test framework running the tests, `mocha` (default), `vitest` or `node` (`node:test`) */
 	testRunner?: TestRunnerName;
 	/** path to a custom Vitest configuration file, used with `testRunner: 'vitest'` */
 	vitestConfig?: string;

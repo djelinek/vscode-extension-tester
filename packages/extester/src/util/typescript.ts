@@ -31,11 +31,11 @@ function findUnhandledTypeScript(files: Iterable<string>): string | undefined {
  * Resolve the consumer's `tsx` CommonJS API from the current working directory.
  * @throws an actionable error naming `source` when `tsx` is not installed
  */
-function resolveTsx(source: string): { consumerRequire: NodeJS.Require; loader: string } {
+function resolveTsx(source: string, api: string = 'tsx/cjs/api'): { consumerRequire: NodeJS.Require; loader: string } {
 	const project = process.cwd();
 	const consumerRequire = createRequire(path.join(project, 'package.json'));
 	try {
-		return { consumerRequire, loader: consumerRequire.resolve('tsx/cjs/api') };
+		return { consumerRequire, loader: consumerRequire.resolve(api) };
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') {
 			throw error;
@@ -78,4 +78,20 @@ export function registerTypeScript(files: Iterable<string>): (() => void) | unde
 	// Keep initialization outside the resolution catch: a broken loader must retain its actual error.
 	const { register } = consumerRequire(loader) as typeof import('tsx/cjs/api');
 	return register();
+}
+
+/**
+ * Register tsx's ES module loader hooks when any of the files is TypeScript, for test runners
+ * that import test files with the ES module loader (e.g. `node:test`), which the CommonJS hook
+ * of {@link registerTypeScript} does not cover. The hooks cannot be removed once registered.
+ * @param files test files about to be imported
+ * @throws an actionable error when a file is TypeScript and tsx cannot be resolved
+ */
+export function registerTypeScriptModules(files: Iterable<string>): void {
+	const source = Array.from(files).find((file) => /\.(?:ts|tsx|mts|cts)$/.test(file));
+	if (!source) {
+		return;
+	}
+	const { consumerRequire, loader } = resolveTsx(source, 'tsx/esm/api');
+	(consumerRequire(loader) as typeof import('tsx/esm/api')).register();
 }

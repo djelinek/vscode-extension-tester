@@ -300,7 +300,7 @@ export class ExTester {
 		const testRunner = selectTestRunner(runOptions, isHiddenWindowRequested());
 		assertTestRunnerAvailable(testRunner.name);
 		// Vitest compiles TypeScript test files itself, in its workers
-		const testFiles = testRunner.name === 'mocha' ? expandTestFiles(toPatterns(testFilesPattern)) : [];
+		const testFiles = testRunner.name !== 'vitest' ? expandTestFiles(toPatterns(testFilesPattern)) : [];
 		assertTypeScriptLoader(withLocators(testFiles, runOptions.customPageObjects));
 		await this.setupRequirements(
 			{ ...setupOptions, vscodeVersion, settings: setupOptions.settings ?? runOptions.settings },
